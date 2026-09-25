@@ -1,6 +1,5 @@
 import React, { useState } from "react"
-
-const API_BASE = `http://${window.location.hostname}:5000`
+import { fetchSuratMasukById, fetchSuratKeluarById, fetchCustomFolders as apiFetchFolders, uploadFile, generateNomorSuratKeluar, updateSuratMasuk, updateSuratKeluar, fetchJenisSurat, fetchKategori } from "./lib/api"
 
 interface EditSuratPageProps {
   type: "masuk" | "keluar"
@@ -30,12 +29,29 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
   const [tanggalTerima, setTanggalTerima] = useState("")
   const [jenisSuratMasuk, setJenisSuratMasuk] = useState("")
   const [suratLoaded, setSuratLoaded] = useState(false)
+  const [jenisOptions, setJenisOptions] = useState<string[]>([])
+  const [kategoriOptions, setKategoriOptions] = useState<string[]>([])
+
+  React.useEffect(() => {
+    const load = async () => {
+      try {
+        const [jenis, kategori] = await Promise.all([
+          fetchJenisSurat(type),
+          fetchKategori(),
+        ])
+        setJenisOptions(jenis)
+        setKategoriOptions(kategori)
+      } catch (err) {
+        console.error("Gagal memuat master data:", err)
+      }
+    }
+    load()
+  }, [type])
 
   const fetchNextNomor = async (jenis: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/surat-keluar/next-nomor/${encodeURIComponent(jenis)}`)
-      const data = await res.json()
-      if (data.success) setNomorSurat(data.nomor)
+      const nomor = await generateNomorSuratKeluar(jenis)
+      setNomorSurat(nomor)
     } catch (err) {
       console.error("Error fetching next nomor:", err)
     }
@@ -52,36 +68,21 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
     const fetchSurat = async () => {
       try {
         setLoading(true)
-        console.log(`Fetching surat from: ${API_BASE}/api/surat-${type}/${suratId}`)
-        const response = await fetch(`${API_BASE}/api/surat-${type}/${suratId}`)
-        console.log(`Response status: ${response.status}`)
+        const s = type === "masuk" ? await fetchSuratMasukById(suratId) : await fetchSuratKeluarById(suratId)
+        setPerihal(s.perihal || "")
+        setIsiSurat(s.isi_surat || "")
+        setKategori(s.kategori || "biasa")
+        setFolder(s.folder || "")
+        setNomorSurat(s.nomor_surat || "")
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-        
-        const data = await response.json()
-        console.log("Fetched surat data:", data)
-        
-        if (data.success && data.data) {
-          const s = data.data
-          setPerihal(s.perihal || "")
-          setIsiSurat(s.isi_surat || "")
-          setKategori(s.kategori || "biasa")
-          setFolder(s.folder || "")
-          setNomorSurat(s.nomor_surat || "")
-          
-          if (type === "keluar") {
-            setTujuan(s.tujuan || "")
-            setTanggalKirim(s.tanggal_kirim ? s.tanggal_kirim.split('T')[0] : "")
-            setJenisSurat(s.jenis_surat || "surat tugas")
-          } else {
-            setPengirim(s.pengirim || "")
-            setTanggalTerima(s.tanggal_terima ? s.tanggal_terima.split('T')[0] : "")
-            setJenisSuratMasuk(s.jenis_surat || "")
-          }
+        if (type === "keluar") {
+          setTujuan(s.tujuan || "")
+          setTanggalKirim(s.tanggal_kirim ? s.tanggal_kirim.split('T')[0] : "")
+          setJenisSurat(s.jenis_surat || "surat tugas")
         } else {
-          setError("Format data surat tidak sesuai")
+          setPengirim(s.pengirim || "")
+          setTanggalTerima(s.tanggal_terima ? s.tanggal_terima.split('T')[0] : "")
+          setJenisSuratMasuk(s.jenis_surat || "")
         }
       } catch (err) {
         console.error("Error fetching surat:", err)
@@ -94,12 +95,8 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
 
     const fetchFolders = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/custom-folders/${type}`)
-        const result = await response.json()
-        if (result.success) {
-          const names = (result.data || []).map((f: any) => f.nama_folder)
-          setFolders(names.sort())
-        }
+        const names = await apiFetchFolders(type)
+        setFolders(names.sort())
       } catch (err) {
         console.error("Error fetching folders:", err)
       }
@@ -131,23 +128,10 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
     try {
       let fileData: any = undefined
       if (file) {
-        const fd = new FormData()
-        fd.append("file", file)
-        const uploadRes = await fetch(`${API_BASE}/api/upload`, {
-          method: "POST",
-          body: fd,
-        })
-        const uploadData = await uploadRes.json()
-        if (!uploadRes.ok) {
-          setError(uploadData.error || "Gagal mengunggah file")
-          setSaving(false)
-          return
-        }
-        fileData = uploadData.file
+        fileData = await uploadFile(file)
       }
 
-      const url = `${API_BASE}/api/surat-${type}/${suratId}`
-      const body: any = {
+      const updates: any = {
         perihal,
         isi_surat: isiSurat,
         kategori,
@@ -155,42 +139,32 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
       }
 
       if (type === "keluar") {
-        body.nomor_surat = nomorSurat
-        body.tujuan = tujuan
-        body.tanggal_kirim = tanggalKirim
-        body.jenis_surat = jenisSurat
+        updates.nomor_surat = nomorSurat
+        updates.tujuan = tujuan
+        updates.tanggal_kirim = tanggalKirim
+        updates.jenis_surat = jenisSurat
         if (fileData) {
-          body.file_draft = fileData
+          updates.file_draft = fileData
         }
-      } else if (type === "masuk") {
-        body.nomor_surat = nomorSurat
-        body.pengirim = pengirim
-        body.tanggal_terima = tanggalTerima
-        body.jenis_surat = jenisSuratMasuk
-        if (fileData) {
-          body.file_lampiran = fileData
-        }
-      }
-
-      const response = await fetch(url, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      })
-      const data = await response.json()
-
-      if (response.ok) {
-        setSaved(true)
-        setTimeout(() => {
-          onClose()
-          onSaved?.()
-        }, 1000)
+        await updateSuratKeluar(suratId, updates)
       } else {
-        setError(data.error || "Gagal menyimpan perubahan")
-        setSaving(false)
+        updates.nomor_surat = nomorSurat
+        updates.pengirim = pengirim
+        updates.tanggal_terima = tanggalTerima
+        updates.jenis_surat = jenisSuratMasuk
+        if (fileData) {
+          updates.file_lampiran = fileData
+        }
+        await updateSuratMasuk(suratId, updates)
       }
+
+      setSaved(true)
+      setTimeout(() => {
+        onClose()
+        onSaved?.()
+      }, 1000)
     } catch (err) {
-      setError("Koneksi ke server gagal")
+      setError("Gagal menyimpan: " + (err instanceof Error ? err.message : String(err)))
       setSaving(false)
     }
   }
@@ -305,8 +279,9 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
                   onChange={(e) => setKategori(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white"
                 >
-                  <option value="biasa">Biasa</option>
-                  <option value="penting">Penting</option>
+                   {kategoriOptions.map(k => (
+                    <option key={k} value={k}>{k.charAt(0).toUpperCase() + k.slice(1)}</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -381,11 +356,9 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
                     }}
                     className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white"
                   >
-                    <option value="surat tugas">Surat Tugas</option>
-                    <option value="surat perintah">Surat Perintah</option>
-                    <option value="surat undangan">Surat Undangan</option>
-                    <option value="surat balasan">Surat Balasan</option>
-                    <option value="surat edaran">Surat Edaran</option>
+                     {jenisOptions.map(v => (
+                      <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
+                    ))}
                   </select>
                 </div>
               </>
@@ -431,13 +404,9 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
                       className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all appearance-none bg-white"
                     >
                       <option value="">-- Pilih Jenis Surat --</option>
-                      <option value="surat masuk biasa">Surat Masuk Biasa</option>
-                      <option value="surat undangan">Surat Undangan</option>
-                      <option value="surat pemberitahuan">Surat Pemberitahuan</option>
-                      <option value="surat tugas">Surat Tugas</option>
-                      <option value="surat perintah">Surat Perintah</option>
-                      <option value="surat rekomendasi">Surat Rekomendasi</option>
-                      <option value="surat izin">Surat Izin</option>
+                       {jenisOptions.map(v => (
+                        <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
+                      ))}
                     </select>
                     <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

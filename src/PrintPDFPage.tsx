@@ -1,4 +1,5 @@
 import React, { useEffect } from "react"
+import { getFileUrl } from "./lib/api"
 
 export function PrintPDFPage() {
   const [params, setParams] = React.useState<{
@@ -7,16 +8,26 @@ export function PrintPDFPage() {
     isi_surat: string
     tanggal_kirim: string
     tujuan: string
+    ttdPath: string
   } | null>(null)
 
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search)
+    let ttdPath = ""
+    const raw = searchParams.get("file_final_ttd") || ""
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        ttdPath = parsed.path || ""
+      } catch {}
+    }
     const data = {
       nomor_surat: searchParams.get("nomor_surat") || "",
       perihal: searchParams.get("perihal") || "",
       isi_surat: searchParams.get("isi_surat") || "",
       tanggal_kirim: searchParams.get("tanggal_kirim") || "",
       tujuan: searchParams.get("tujuan") || "",
+      ttdPath,
     }
     setParams(data)
 
@@ -40,20 +51,6 @@ export function PrintPDFPage() {
       })
     } catch {
       return dateStr
-    }
-  }
-
-  const parseContent = (isiSurat: string) => {
-    if (!isiSurat) return "-"
-    try {
-      const decoded = decodeURIComponent(isiSurat)
-      const parsed = JSON.parse(decoded)
-      if (typeof parsed === "object" && parsed.html) {
-        return parsed.html
-      }
-      return isiSurat
-    } catch {
-      return isiSurat
     }
   }
 
@@ -199,16 +196,18 @@ export function PrintPDFPage() {
             <p className="intro">{params.isi_surat || "-"}</p>
           </div>
 
-          <div className="signature">
-            <div className="greeting">
-              Hormat kami,
-              <br />
-              Sandya Networks
+          {params.ttdPath && (
+            <div className="signature">
+              <div className="greeting">
+                Hormat kami,
+                <br />
+                Sandya Networks
+              </div>
+              <img className="tanda-tangan-image" src={getFileUrl(params.ttdPath)} alt="tanda tangan" />
+              <div className="person">Ferry Dwi Leksono</div>
+              <div className="role">a.n. Kepala Kantor Layanan Pacitan</div>
             </div>
-            <img className="tanda-tangan-image" src="/ttd.png" alt="tanda tangan" />
-            <div className="person">Ferry Dwi Leksono</div>
-            <div className="role">a.n. Kepala Kantor Layanan Pacitan</div>
-          </div>
+          )}
         </section>
       </body>
     </html>
