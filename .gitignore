@@ -3,7 +3,6 @@ dist/
 build/
 .cache/
 .env*
-.vite/
 uploads/
 *.log
 .claude-replay.*
