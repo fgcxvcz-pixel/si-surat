@@ -150,11 +150,11 @@ export function ModalViewSurat({
                 <span
                   className="text-xs font-medium px-2 py-1 rounded-full capitalize"
                   style={{
-                    background: surat.status_tindak_lanjut === "selesai" ? "#ECFDF5" : surat.status_tindak_lanjut === "menunggu" ? "#FEF3C7" : "#FEF2F2",
-                    color: surat.status_tindak_lanjut === "selesai" ? "#059669" : surat.status_tindak_lanjut === "menunggu" ? "#D97706" : "#DC2626",
+                    background: surat.status_tindak_lanjut === "selesai" ? "#ECFDF5" : surat.status_tindak_lanjut === "menunggu" ? "#FEF3C7" : surat.status_tindak_lanjut === "menunggu_approval" ? "#EFF6FF" : "#FEF2F2",
+                    color: surat.status_tindak_lanjut === "selesai" ? "#059669" : surat.status_tindak_lanjut === "menunggu" ? "#D97706" : surat.status_tindak_lanjut === "menunggu_approval" ? "#2563EB" : "#DC2626",
                   }}
                 >
-                  {surat.status_tindak_lanjut === "selesai" ? "Selesai" : surat.status_tindak_lanjut === "menunggu" ? "Menunggu" : "Belum"}
+                  {surat.status_tindak_lanjut === "selesai" ? "Selesai" : surat.status_tindak_lanjut === "menunggu" ? "Menunggu Dibalas" : surat.status_tindak_lanjut === "menunggu_approval" ? "Menunggu Approval" : "Tidak"}
                 </span>
               </div>
             )}

@@ -373,8 +373,9 @@ setDeletingSurat(false)
                   className="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white"
                 >
                   <option value="semua">Semua Status</option>
-                   <option value="belum">Belum</option>
-                   <option value="menunggu">Menunggu</option>
+                   <option value="tidak">Tidak</option>
+                   <option value="menunggu">Menunggu Dibalas</option>
+                   <option value="menunggu_approval">Menunggu Approval</option>
                    <option value="selesai">Selesai</option>
                 </select>
                 <button

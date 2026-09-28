@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS format_nomor_surat (
 -- 4. Tanda Tangan Digital
 CREATE TABLE IF NOT EXISTS tanda_tangan_digital (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  id_user UUID NOT NULL REFERENCES pengguna(id),
+  id_user UUID NOT NULL REFERENCES pengguna(id) ON DELETE CASCADE,
   file_ttd JSONB NOT NULL,
   is_aktif BOOLEAN NOT NULL DEFAULT true,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS tanda_tangan_digital (
 -- 5. Surat Masuk
 CREATE TABLE IF NOT EXISTS surat_masuk (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  id_user UUID NOT NULL REFERENCES pengguna(id),
+  id_user UUID NOT NULL REFERENCES pengguna(id) ON DELETE CASCADE,
   id_format UUID REFERENCES format_nomor_surat(id),
   id_surat_keluar_ref UUID,
   nomor_surat TEXT NOT NULL UNIQUE,
@@ -68,9 +68,9 @@ CREATE INDEX IF NOT EXISTS idx_surat_masuk_status ON surat_masuk(status_tindak_l
 -- 6. Surat Keluar
 CREATE TABLE IF NOT EXISTS surat_keluar (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  id_user UUID NOT NULL REFERENCES pengguna(id),
+  id_user UUID NOT NULL REFERENCES pengguna(id) ON DELETE CASCADE,
   id_format UUID REFERENCES format_nomor_surat(id),
-  approved_by UUID REFERENCES pengguna(id),
+  approved_by UUID REFERENCES pengguna(id) ON DELETE CASCADE,
   id_ttd UUID REFERENCES tanda_tangan_digital(id),
   id_surat_masuk_ref UUID,
   nomor_surat TEXT NOT NULL UNIQUE,
