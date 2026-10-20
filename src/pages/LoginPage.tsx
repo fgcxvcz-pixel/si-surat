@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { supabase } from "../lib/supabase"
+import { login } from "../lib/api"
+import { setToken } from "../lib/http"
 import { usePasswordValidation } from "../hooks/usePasswordValidation"
 import { PasswordValidationLabel } from "../components/PasswordValidationLabel"
 import { IconMail, IconEye } from "../components/Icons"
@@ -29,14 +30,12 @@ export function LoginPage({
     }
     setLoading(true)
     try {
-      const { data: pengguna } = await supabase.from("pengguna").select("id, email").eq("username", username).single()
-      if (!pengguna) { setError("Username tidak terdaftar."); setLoading(false); return }
-      const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({ email: pengguna.email, password })
-      if (authErr) { setError(authErr.message.includes("Invalid login") ? "Password salah." : authErr.message); setLoading(false); return }
-      const { data: profile } = await supabase.from("pengguna").select("id, nama, username, email, id_role:roles(nama_role)").eq("id", authData.user.id).single()
-      onLogin({ id: profile?.id || authData.user.id, nama: profile?.nama || username, role: (profile?.id_role as any)?.nama_role || null })
-    } catch (err) {
-      setError("Koneksi ke server gagal.")
+      const data = await login(username, password)
+      setToken(data.token)
+      onLogin({ id: data.user.id, nama: data.user.nama, role: data.user.role })
+    } catch (err: any) {
+      setError(err.message || "Koneksi ke server gagal.")
+    } finally {
       setLoading(false)
     }
   }
@@ -92,7 +91,14 @@ export function LoginPage({
                 <PasswordValidationLabel message={passwordValidation.message} color={passwordValidation.color} icon={passwordValidation.icon} isEmpty={passwordValidation.isEmpty} />
               </div>
               <div className="text-right">
-                <button type="button" onClick={onLupaPassword} className="text-sm font-medium transition-colors duration-200" style={{ color: "#2563EB" }}>Lupa Password?</button>
+                <button
+                  type="button"
+                  onClick={onLupaPassword}
+                  className="text-sm font-medium transition-colors duration-200"
+                  style={{ color: "#2563EB" }}
+                >
+                  Lupa Password?
+                </button>
               </div>
               {error && (<div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-50 border border-red-200"><span className="text-red-600 text-sm">{error}</span></div>)}
               <button type="submit" disabled={loading} className="w-full py-3 rounded-xl font-semibold text-white text-sm transition-all duration-200 shadow-md hover:shadow-lg hover:scale-[1.01] active:scale-[0.99]" style={{ background: loading ? "#93C5FD" : "linear-gradient(135deg, #3B82F6, #2563EB)", cursor: loading ? "not-allowed" : "pointer" }}>

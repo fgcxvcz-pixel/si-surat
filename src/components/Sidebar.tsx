@@ -1,5 +1,5 @@
-import { type Page } from "../lib/constants"
-import { IconDashboard, IconInbox, IconPaperPlane, IconUsers, IconFolder, IconPanelLeft, IconLogout, IconMail, IconPenTool, IconAllMail } from "./Icons"
+import { type Page, isSuperAdmin, isKepalaRole, isAdminRole } from "../lib/constants"
+import { IconDashboard, IconInbox, IconPaperPlane, IconUsers, IconFolder, IconPanelLeft, IconLogout, IconMail, IconPenTool, IconAllMail, IconAuditLog } from "./Icons"
 
 export function Sidebar({
   page,
@@ -16,19 +16,28 @@ export function Sidebar({
   onToggle: () => void
   user: { name: string; role: string; avatar: string }
 }) {
-  const isKepala = user.role === "Kepala" || user.role === "Kepala Bagian" || user.role?.includes("Kepala")
+  const isKepala = isKepalaRole(user.role)
+  const isSuper = isSuperAdmin(user.role)
+  const isAdmin = isAdminRole(user.role)
 
   const nav = [
     { id: "dashboard" as Page, label: "Dashboard", icon: <IconDashboard /> },
     { id: "surat-masuk" as Page, label: "Surat Masuk", icon: <IconInbox /> },
     { id: "surat-keluar" as Page, label: "Surat Keluar", icon: <IconPaperPlane /> },
-    ...(isKepala ? [
+    ...(isSuper ? [
+      { id: "manajemen-akun" as Page, label: "Manajemen Akun", icon: <IconUsers /> },
+      { id: "master-data" as Page, label: "Master Data", icon: <IconFolder /> },
+      { id: "tanda-tangan" as Page, label: "Tanda Tangan", icon: <IconPenTool /> },
+    ] : isKepala ? [
       { id: "tanda-tangan" as Page, label: "Tanda Tangan", icon: <IconPenTool /> },
     ] : [
       { id: "manajemen-akun" as Page, label: "Manajemen Akun", icon: <IconUsers /> },
       { id: "master-data" as Page, label: "Master Data", icon: <IconFolder /> },
     ]),
     { id: "rekap-surat" as Page, label: "Rekap Surat", icon: <IconAllMail /> },
+    ...(isSuper || isAdmin ? [
+      { id: "audit-logs" as Page, label: "Audit Log", icon: <IconAuditLog /> },
+    ] : []),
   ]
 
   const w = collapsed ? "64px" : "240px"

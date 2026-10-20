@@ -9,6 +9,7 @@ export function PrintPDFPage() {
     tanggal_kirim: string
     tujuan: string
     ttdPath: string
+    nama_ttd: string
   } | null>(null)
 
   useEffect(() => {
@@ -28,6 +29,7 @@ export function PrintPDFPage() {
       tanggal_kirim: searchParams.get("tanggal_kirim") || "",
       tujuan: searchParams.get("tujuan") || "",
       ttdPath,
+      nama_ttd: searchParams.get("nama_ttd") || "",
     }
     setParams(data)
 
@@ -204,7 +206,7 @@ export function PrintPDFPage() {
                 Sandya Networks
               </div>
               <img className="tanda-tangan-image" src={getFileUrl(params.ttdPath)} alt="tanda tangan" />
-              <div className="person">Ferry Dwi Leksono</div>
+              <div className="person">{params.nama_ttd || "Sandya Networks"}</div>
               <div className="role">a.n. Kepala Kantor Layanan Pacitan</div>
             </div>
           )}

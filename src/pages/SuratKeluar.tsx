@@ -1,14 +1,15 @@
 import React, { useState, useCallback } from "react"
-import { currentMonthKey, inMonth, fileApiUrl } from "../lib/constants"
+import { currentMonthKey, inDateRange, fileApiUrl, isSuperAdmin, isKepalaRole } from "../lib/constants"
 import { fetchSuratKeluar, fetchCustomFolders, fetchReminders, createCustomFolder, deleteCustomFolderByName, deleteSuratKeluar, updateReminderStatus, updateSuratMasukStatus, fetchTandaTangan, updateSuratKeluar, approveSuratKeluar, fetchKategori } from "../lib/api"
 import { type FolderItem } from "../components/FolderPanel"
 import { FolderPanel } from "../components/FolderPanel"
+import { canManageFolder } from "../lib/constants"
 import { TopBar } from "../components/TopBar"
 import { IconFolderOpen, IconSearch, IconPlus, IconEye, IconInbox } from "../components/Icons"
 import { ModalTambahSurat } from "../components/modals/ModalTambahSurat"
 import { ModalViewSurat } from "../components/modals/ModalViewSurat"
 import { ModalPreviewSurat } from "../components/modals/ModalPreviewSurat"
-import { exportSuratToCSV } from "./Dashboard"
+import { exportSuratToXLSX } from "../lib/excelExport"
 
 // ── Surat Keluar (sementara disembunyikan) ────────────────────────────────────
 export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEditClick?: (id: string) => void; initialDetailId?: string | null; onNavigate?: (page: any, suratId?: string) => void }) {
@@ -19,7 +20,17 @@ export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEd
     const [data, setData] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [filterKategori, setFilterKategori] = useState("semua")
+    const [dateFrom, setDateFrom] = useState("")
+    const [dateTo, setDateTo] = useState("")
     const [month, setMonth] = useState(currentMonthKey)
+
+    const handleMonthChange = (m: string) => {
+      setMonth(m)
+      const [y, mo] = m.split("-").map(Number)
+      setDateFrom(`${y}-${String(mo).padStart(2, "0")}-01`)
+      const lastDay = new Date(y, mo, 0).getDate()
+      setDateTo(`${y}-${String(mo).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`)
+    }
     const [viewSurat, setViewSurat] = useState<{ type: "masuk" | "keluar"; id: string } | null>(null)
     const [previewSuratId, setPreviewSuratId] = useState<string | null>(null)
 
@@ -44,12 +55,32 @@ export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEd
      id: string
      pihak: string
    }>({ show: false, id: "", pihak: "" })
-   const [deletingSurat, setDeletingSurat] = useState(false)
-   const [page, setPage] = useState(1)
-   const PER_PAGE = 10
-     const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-      const [kategoriOptions, setKategoriOptions] = useState<string[]>([])
-      const [bellRefresh, setBellRefresh] = useState(0)
+    const [deletingSurat, setDeletingSurat] = useState(false)
+    const [page, setPage] = useState(1)
+    const PER_PAGE = 10
+      const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+       const [kategoriOptions, setKategoriOptions] = useState<string[]>([])
+       const [bellRefresh, setBellRefresh] = useState(0)
+        const [isSelectMode, setIsSelectMode] = useState(false)
+        const [selectedIds, setSelectedIds] = useState<string[]>([])
+        const [batchDeleting, setBatchDeleting] = useState(false)
+        const [batchDeleteConfirm, setBatchDeleteConfirm] = useState<{
+          show: boolean
+          count: number
+        }>({ show: false, count: 0 })
+        const [batchDeleteModal, setBatchDeleteModal] = useState<{
+          show: boolean
+          type: 'success' | 'error'
+          totalRequested: number
+          deleted: number
+          failed: Array<{ id: number; reason: string; nomor_surat?: string }>
+        }>({
+          show: false,
+          type: 'success',
+          totalRequested: 0,
+          deleted: 0,
+          failed: [],
+        })
 
   const openPreview = useCallback((url: string) => {
     if (!url) return
@@ -97,7 +128,7 @@ export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEd
      fetchKategori().then(setKategoriOptions).catch(console.error)
    }, [])
 
-    const monthData = data.filter((s) => inMonth(s.tanggal_kirim, month))
+    const monthData = data.filter((s) => inDateRange(s.tanggal_kirim, dateFrom, dateTo))
    const folderColors = [
      "#059669",
      "#2563EB",
@@ -133,7 +164,7 @@ export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEd
 
    React.useEffect(() => {
      setPage(1)
-   }, [search, filterKategori, selectedFolder, month])
+    }, [search, filterKategori, selectedFolder, dateFrom, dateTo, month])
 
    const folderLabel =
      selectedFolder === "__all__" ? "Semua Surat Keluar" : selectedFolder
@@ -172,20 +203,102 @@ export function SuratKeluar({ onEditClick, initialDetailId, onNavigate }: { onEd
       }
     }
 
-   const handleConfirmDeleteSurat = async () => {
-     if (!deleteSuratConfirm.id) return
-     setDeletingSurat(true)
-     try {
-       await deleteSuratKeluar(deleteSuratConfirm.id)
-       setOpenDetailId(null)
-       await fetchData()
-     } catch (err) {
-       console.error("Error deleting surat:", err)
-     } finally {
-       setDeletingSurat(false)
-       setDeleteSuratConfirm({ show: false, id: "", pihak: "" })
+    const handleConfirmDeleteSurat = async () => {
+      if (!deleteSuratConfirm.id) return
+      setDeletingSurat(true)
+      try {
+        await deleteSuratKeluar(deleteSuratConfirm.id)
+        setOpenDetailId(null)
+        await fetchData()
+      } catch (err) {
+        console.error("Error deleting surat:", err)
+      } finally {
+        setDeletingSurat(false)
+        setDeleteSuratConfirm({ show: false, id: "", pihak: "" })
+      }
+    }
+
+    const handleToggleSelect = (id: string) => {
+      setSelectedIds(prev =>
+        prev.includes(id)
+          ? prev.filter(i => i !== id)
+          : [...prev, id]
+      )
+    }
+
+    const handleToggleSelectAll = () => {
+      const pageIds = paged.map(s => String(s.id))
+      setSelectedIds(prev =>
+        prev.length === pageIds.length && pageIds.length > 0
+          ? []
+          : pageIds
+      )
+    }
+
+    const handleEnterSelectMode = () => {
+      setIsSelectMode(true)
+      setSelectedIds([])
+    }
+
+    const handleCancelSelect = () => {
+      setIsSelectMode(false)
+      setSelectedIds([])
+    }
+
+     const handleBatchDelete = async () => {
+       if (selectedIds.length === 0) return
+       setBatchDeleteConfirm({ show: true, count: selectedIds.length })
      }
-   }
+
+     const executeBatchDelete = async (ids: string[]) => {
+       try {
+         setBatchDeleting(true)
+         const numIds = ids.map(id => parseInt(id))
+
+         const response = await fetch('/api/surat-keluar/batch', {
+           method: 'DELETE',
+           headers: {
+             'Content-Type': 'application/json',
+             'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
+           },
+           body: JSON.stringify({ ids: numIds })
+         })
+
+         const result = await response.json()
+
+         if (result.ok) {
+           setBatchDeleteModal({
+             show: true,
+             type: 'success',
+             totalRequested: ids.length,
+             deleted: result.deleted,
+             failed: [],
+           })
+           setIsSelectMode(false)
+           setSelectedIds([])
+           await fetchData()
+         } else {
+           setBatchDeleteModal({
+             show: true,
+             type: 'error',
+             totalRequested: ids.length,
+             deleted: 0,
+             failed: result.failed || [],
+           })
+         }
+       } catch (err) {
+         console.error('Error batch deleting surat:', err)
+         setBatchDeleteModal({
+           show: true,
+           type: 'error',
+           totalRequested: ids.length,
+           deleted: 0,
+           failed: [],
+         })
+       } finally {
+         setBatchDeleting(false)
+       }
+     }
 
    return (
      <>
@@ -308,8 +421,119 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                <iframe src={previewUrl} title="Preview PDF" className="w-full flex-1" style={{ border: "none", background: "#F1F5F9" }} />
              </div>
            </div>
-         )}
-         <TopBar
+          )}
+          {batchDeleteConfirm.show && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-lg p-6 w-96">
+                <h3 className="text-lg font-semibold mb-2 text-slate-900">Hapus {batchDeleteConfirm.count} Surat?</h3>
+                <p className="text-sm text-slate-600 mb-6">
+                  Apakah Anda yakin ingin menghapus {batchDeleteConfirm.count} surat? File attachment akan dihapus juga. Tindakan ini tidak dapat dibatalkan.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setBatchDeleteConfirm({ show: false, count: 0 })}
+                    disabled={batchDeleting}
+                    className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setBatchDeleteConfirm({ show: false, count: 0 })
+                      await executeBatchDelete(selectedIds)
+                    }}
+                    disabled={batchDeleting}
+                    className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                    style={{ background: batchDeleting ? "#EF4444" : "#DC2626" }}
+                  >
+                    {batchDeleting ? 'Menghapus...' : 'Hapus Surat'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {batchDeleteModal.show && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+                <div className="flex items-center gap-3 mb-4">
+                  {batchDeleteModal.type === 'success' ? (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-slate-900">Penghapusan Berhasil</h3>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-semibold text-slate-900">Penghapusan Gagal</h3>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <p className="text-sm text-slate-600 mb-4">
+                  {batchDeleteModal.type === 'success'
+                    ? `${batchDeleteModal.deleted} surat berhasil dihapus.`
+                    : `${batchDeleteModal.failed.length} dari ${batchDeleteModal.totalRequested} surat gagal dihapus.`}
+                </p>
+
+                {batchDeleteModal.type === 'error' && batchDeleteModal.failed.length > 0 && (
+                  <div className="mb-4 max-h-64 overflow-y-auto bg-red-50 rounded-lg p-3 border border-red-100">
+                    <p className="text-xs font-semibold text-red-900 mb-2">Detail Gagal:</p>
+                    <div className="space-y-2">
+                      {batchDeleteModal.failed.map((fail, idx) => (
+                        <div key={idx} className="text-xs text-red-800 border-b border-red-100 pb-2 last:border-0">
+                          <p className="font-medium">ID: {fail.id}</p>
+                          {fail.nomor_surat && <p className="text-red-700">Nomor: {fail.nomor_surat}</p>}
+                          <p className="text-red-700">Alasan: {fail.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => {
+                      setBatchDeleteModal({ ...batchDeleteModal, show: false })
+                      if (batchDeleteModal.type === 'success') {
+                        setSelectedIds([])
+                        setIsSelectMode(false)
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                  >
+                    Tutup
+                  </button>
+                  {batchDeleteModal.type === 'error' && batchDeleteModal.failed.length > 0 && (
+                    <button
+                      onClick={async () => {
+                        setBatchDeleteModal({ ...batchDeleteModal, show: false })
+                        await executeBatchDelete(selectedIds)
+                      }}
+                      disabled={batchDeleting}
+                      className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors disabled:opacity-50"
+                      style={{ background: batchDeleting ? "#EF4444" : "#DC2626" }}
+                    >
+                      {batchDeleting ? 'Menghapus...' : 'Coba Lagi'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <TopBar
             title="Surat Keluar"
             subtitle={`${data.length} surat terdaftar`}
             onNavigate={onNavigate}
@@ -325,12 +549,12 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
             selected={selectedFolder}
             onSelect={setSelectedFolder}
             month={month}
-            onMonthChange={setMonth}
-            onAddFolder={() => setShowAddFolder(true)}
-            onDeleteWithConfirm={(key) => {
+            onMonthChange={handleMonthChange}
+            onAddFolder={canManageFolder() ? () => setShowAddFolder(true) : undefined}
+            onDeleteWithConfirm={canManageFolder() ? (key) => {
               setOpenDetailId(null)
               setDeleteConfirm({ show: true, folder: key })
-            }}
+            } : undefined}
             totalCount={monthData.length}
           />
 
@@ -368,65 +592,141 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                    {kategoriOptions.map(k => (
                      <option key={k} value={k}>{k.charAt(0).toUpperCase() + k.slice(1)}</option>
                    ))}
-                 </select>
-                <button
-                  onClick={() =>
-                    exportSuratToCSV("Surat_Keluar", filtered, [
-                      "nomor_surat",
-                      "tujuan",
-                      "perihal",
-                      "kategori",
-                      "tanggal_kirim",
-                      "status_approval",
-                    ])
-                  }
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="7 10 12 15 17 10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  <span>Export</span>
-                </button>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                  style={{ background: "#2563EB" }}
-                >
-                  <IconPlus />
-                  <span>Tambah Surat</span>
-                </button>
-              </div>
-            </div>
+                  </select>
+                <div className="flex items-center gap-1.5">
+                  <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-2 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white" title="Tanggal dari" />
+                  <span className="text-slate-400 text-xs">–</span>
+                  <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="px-2 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white" title="Tanggal sampai" />
+                </div>
+                 <button
+                   onClick={() =>
+                     exportSuratToXLSX("Surat_Keluar", filtered, [
+                       "nomor_surat",
+                       "tujuan",
+                       "perihal",
+                       "kategori",
+                       "tanggal_kirim",
+                       "status_approval",
+                     ], [
+                       "No Surat", "Tujuan", "Perihal", "Kategori", "Tanggal Kirim", "Status Approval",
+                     ])
+                   }
+                   className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 transition-colors"
+                 >
+                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                     <polyline points="7 10 12 15 17 10" />
+                     <line x1="12" y1="15" x2="12" y2="3" />
+                   </svg>
+                   <span>Export</span>
+                 </button>
+                 {!isSelectMode ? (
+                   <>
+                     <button
+                       onClick={handleEnterSelectMode}
+                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50 transition-colors"
+                     >
+                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                       </svg>
+                       <span>Pilih Hapus Surat</span>
+                     </button>
+                     <button
+                       onClick={() => setShowModal(true)}
+                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+                       style={{ background: "#2563EB" }}
+                     >
+                       <IconPlus />
+                       <span>Tambah Surat</span>
+                     </button>
+                   </>
+                 ) : (
+                   <>
+                     <button
+                       onClick={handleCancelSelect}
+                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50 transition-colors"
+                     >
+                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                         <line x1="18" y1="6" x2="6" y2="18"></line>
+                         <line x1="6" y1="6" x2="18" y2="18"></line>
+                       </svg>
+                       <span>Batal Pilih</span>
+                     </button>
+                     <button
+                       onClick={() => setShowModal(true)}
+                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+                       style={{ background: "#2563EB" }}
+                     >
+                       <IconPlus />
+                       <span>Tambah Surat</span>
+                     </button>
+                   </>
+                 )}
+               </div>
+             </div>
 
-            {/* Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr style={{ background: "#F8FAFC" }}>
-                    {["NO", "No Surat", "Tanggal", "Tujuan", "Perihal", "Kategori", "Aksi"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap"
-                        >
-                          {h}
-                        </th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody key="surat-keluar-body">
-                  {loading ? (
-                    <tr key="loading">
-                       <td colSpan={7} className="px-6 py-8 text-center text-sm text-slate-500">
-                         Memuat data...
-                       </td>
-                    </tr>
-                  ) : filtered.length === 0 ? (
-                    <tr key="empty">
-                        <td colSpan={7} className="px-6 py-8 text-center text-sm text-slate-500">
+             {/* Batch Delete Action Bar */}
+             {isSelectMode && selectedIds.length > 0 && (
+               <div className="px-6 py-3 bg-blue-50 border-b border-blue-200 flex items-center justify-between">
+                 <div className="text-sm font-medium text-blue-900">
+                   ✓ {selectedIds.length} surat dipilih
+                 </div>
+                 <div className="flex gap-2">
+                   <button
+                     onClick={handleCancelSelect}
+                     className="px-4 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                     disabled={batchDeleting}
+                   >
+                     Batal
+                   </button>
+                   <button
+                     onClick={handleBatchDelete}
+                     className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors disabled:bg-slate-400"
+                     disabled={batchDeleting}
+                   >
+                     {batchDeleting ? 'Menghapus...' : `Hapus ${selectedIds.length} Surat`}
+                   </button>
+                 </div>
+               </div>
+             )}
+
+             {/* Table */}
+             <div className="overflow-x-auto">
+               <table className="w-full">
+                 <thead>
+                   <tr style={{ background: "#F8FAFC" }}>
+                     {isSelectMode && (
+                       <th className="px-3 py-3 w-12 text-left">
+                         <input
+                           type="checkbox"
+                           checked={selectedIds.length === paged.length && paged.length > 0}
+                           onChange={handleToggleSelectAll}
+                           className="w-4 h-4 rounded cursor-pointer"
+                         />
+                       </th>
+                     )}
+                     {["NO", "No Surat", "Tanggal", "Tujuan", "Perihal", "Kategori", "Aksi"].map(
+                       (h) => (
+                         <th
+                           key={h}
+                           className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap"
+                         >
+                           {h}
+                         </th>
+                       ),
+                     )}
+                   </tr>
+                 </thead>
+                 <tbody key="surat-keluar-body">
+                   {loading ? (
+                     <tr key="loading">
+                        <td colSpan={isSelectMode ? 8 : 7} className="px-6 py-8 text-center text-sm text-slate-500">
+                          Memuat data...
+                        </td>
+                     </tr>
+                   ) : filtered.length === 0 ? (
+                     <tr key="empty">
+                         <td colSpan={isSelectMode ? 8 : 7} className="px-6 py-8 text-center text-sm text-slate-500">
                           Tidak ada surat keluar
                         </td>
                     </tr>
@@ -449,40 +749,50 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                 (e.currentTarget as HTMLElement).style.background =
                                   "white"
                             }}
-                          >
-                            <td className="px-5 py-3.5 text-sm text-slate-600">
-                              {(page - 1) * PER_PAGE + paged.indexOf(s) + 1}
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-sm font-semibold text-slate-800" style={{ fontFamily: "JetBrains Mono, monospace" }}>
-                                {s.nomor_surat}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5 text-sm text-slate-600 whitespace-nowrap">
-                              {tanggalFormatted}
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-sm font-medium text-slate-800">
-                                {s.tujuan}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <span className="text-sm text-slate-700 line-clamp-1 max-w-xs">
-                                {s.perihal}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5">
-                              <div className="flex items-center gap-1.5">
-                                <div
-                                  className="w-2 h-2 rounded-full"
-                                  style={{
-                                    background: s.kategori === "penting" ? "#DC2626" : "#94A3B8",
-                                  }}
-                                />
-                                <span className="text-xs text-slate-600 capitalize">
-                                  {s.kategori}
-                                </span>
-                              </div>
+                           >
+                             {isSelectMode && (
+                               <td className="px-3 py-3.5 w-12">
+                                 <input
+                                   type="checkbox"
+                                   checked={selectedIds.includes(String(s.id))}
+                                   onChange={() => handleToggleSelect(String(s.id))}
+                                   className="w-4 h-4 rounded cursor-pointer"
+                                 />
+                               </td>
+                             )}
+                             <td className="px-5 py-3.5 text-sm text-slate-600">
+                               {(page - 1) * PER_PAGE + paged.indexOf(s) + 1}
+                             </td>
+                             <td className="px-5 py-3.5">
+                               <span className="text-sm font-semibold text-slate-800" style={{ fontFamily: "JetBrains Mono, monospace" }}>
+                                 {s.nomor_surat}
+                               </span>
+                             </td>
+                             <td className="px-5 py-3.5 text-sm text-slate-600 whitespace-nowrap">
+                               {tanggalFormatted}
+                             </td>
+                             <td className="px-5 py-3.5">
+                               <span className="text-sm font-medium text-slate-800">
+                                 {s.tujuan}
+                               </span>
+                             </td>
+                             <td className="px-5 py-3.5">
+                               <span className="text-sm text-slate-700 line-clamp-1 max-w-xs">
+                                 {s.perihal}
+                               </span>
+                             </td>
+                             <td className="px-5 py-3.5">
+                               <div className="flex items-center gap-1.5">
+                                 <div
+                                   className="w-2 h-2 rounded-full"
+                                   style={{
+                                     background: s.kategori === "penting" ? "#DC2626" : "#94A3B8",
+                                   }}
+                                 />
+                                 <span className="text-xs text-slate-600 capitalize">
+                                   {s.kategori}
+                                 </span>
+                               </div>
                             </td>
                               <td className="px-5 py-3.5 whitespace-nowrap">
                                 <div className="flex items-center gap-1.5">
@@ -539,6 +849,7 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                       isi_surat: s.isi_surat || '',
                                       tanggal_kirim: s.tanggal_kirim || '',
                                       tujuan: s.tujuan || '',
+                                      nama_ttd: s.id_ttd?.id_user?.nama || '',
                                     })
                                     const printUrl = `${window.location.origin}/print-pdf?${params.toString()}`
                                     const message = `Surat Keluar\n\nNo: ${s.nomor_surat}\nPenerima: ${s.tujuan}\nPerihal: ${s.perihal}\n\nCetak/PDF:\n${printUrl}`
@@ -587,7 +898,7 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                      const isDone = justApproved === s.id || s.status_approval === "disetujui" || s.id_ttd || (reminder && reminder.status === 'selesai')
                                     // Cek role - hanya Kepala yang bisa tandai selesai
                                     const savedUser = localStorage.getItem("userInfo")
-                                    const isKepala = savedUser ? JSON.parse(savedUser).role?.toLowerCase().includes("kepala") : false
+                                    const isKepala = savedUser ? (isKepalaRole(JSON.parse(savedUser).role) || isSuperAdmin(JSON.parse(savedUser).role)) : false
                                     if (!isKepala) return null
                                      return (
                                         <button
@@ -604,9 +915,13 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                               // 3. Approve surat keluar (set approved_by + tanggal_approval + id_ttd)
                                               const currentUserId = JSON.parse(localStorage.getItem("userInfo") || "{}").id
                                               await approveSuratKeluar(s.id, currentUserId)
-                                              // 4. Fetch TTD aktif & link ke surat keluar
+                                              // 4. Fetch TTD aktif milik approver & link ke surat keluar
                                               const ttdList = await fetchTandaTangan()
-                                              const ttd = ttdList?.find((t: any) => t.is_aktif)
+                                              const ttd = ttdList?.find((t: any) => {
+                                                if (!t.is_aktif) return false
+                                                const ttdUserId = t.id_user?.id ?? t.id_user
+                                                return Number(ttdUserId) === Number(currentUserId)
+                                              })
                                               if (ttd) {
                                                 await updateSuratKeluar(s.id, { id_ttd: ttd.id }).catch(() => {})
                                               }
@@ -654,51 +969,71 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                     </div>
                                   </div>
 
-                                    <div className="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-3 border-b border-slate-50">
-                                       <div>
+                                     <div className="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-3 border-b border-slate-50">
+                                        <div>
                                          <p className="text-xs text-slate-400 mb-0.5">
                                            No. Surat
                                          </p>
                                          <p className="text-sm font-semibold text-slate-800" style={{ fontFamily: "JetBrains Mono, monospace" }}>
                                            {s.nomor_surat}
                                          </p>
-                                       </div>
-                                       <div>
+                                        </div>
+                                        <div>
                                          <p className="text-xs text-slate-400 mb-0.5">
                                            Tujuan
                                          </p>
                                          <p className="text-sm font-medium text-slate-800">
                                            {s.tujuan}
                                          </p>
-                                       </div>
-                                       <div>
+                                        </div>
+                                        <div>
                                          <p className="text-xs text-slate-400 mb-0.5">
                                            Tanggal Kirim
                                          </p>
                                          <p className="text-sm font-medium text-slate-800">
                                            {tanggalFormatted}
                                          </p>
-                                       </div>
-                                       <div>
+                                        </div>
+                                         <div>
                                          <p className="text-xs text-slate-400 mb-0.5">
                                            Jenis Surat
                                          </p>
                                          <p className="text-sm font-medium text-slate-800 capitalize">
                                            {s.jenis_surat || 'surat tugas'}
                                          </p>
-                                       </div>
+                                        </div>
+                                        <div>
+                                         <p className="text-xs text-slate-400 mb-0.5">
+                                           Perihal
+                                         </p>
+                                         <p className="text-sm font-medium text-slate-700">
+                                           {s.perihal}
+                                         </p>
+                                        </div>
+                                        <div>
+                                         <p className="text-xs text-slate-400 mb-0.5">
+                                           Status Approval
+                                         </p>
+                                         <span
+                                           className="text-xs font-medium px-2 py-1 rounded-full capitalize inline-block"
+                                           style={{
+                                             background: s.status_approval === "disetujui" ? "#ECFDF5" : "#EFF6FF",
+                                             color: s.status_approval === "disetujui" ? "#059669" : "#2563EB",
+                                           }}
+                                         >
+                                           {s.status_approval === "disetujui" ? "Disetujui" : "Menunggu Approval"}
+                                         </span>
+                                         {s.status_approval === "disetujui" && (
+                                           <p className="text-xs text-slate-500 mt-1">
+                                             Oleh: {s.approved_by?.nama || "-"}
+                                             {s.tanggal_approval && ` • ${new Date(s.tanggal_approval).toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' })}`}
+                                           </p>
+                                         )}
+                                        </div>
+
                                      </div>
 
-                                   <div className="px-5 py-4 border-b border-slate-50">
-                                     <p className="text-xs text-slate-400 mb-2">
-                                       Perihal
-                                     </p>
-                                     <p className="text-sm text-slate-700 font-medium">
-                                       {s.perihal}
-                                     </p>
-                                   </div>
-
-                                   <div className="px-5 py-4 border-b border-slate-50">
+                                   <div className="px-5 py-3 border-b border-slate-50">
                                      <p className="text-xs text-slate-400 mb-2">
                                        Isi Surat
                                      </p>
@@ -707,8 +1042,8 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                      </p>
                                    </div>
 
-                                   <div className="px-5 py-4">
-                                     <p className="text-xs text-slate-400 mb-3">
+                                   <div className="px-5 py-3">
+                                     <p className="text-xs text-slate-400 mb-2">
                                        File Dokumen
                                      </p>
                                      <div className="flex flex-wrap gap-2">
@@ -737,20 +1072,20 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                        </div>
                                      </div>
 
-                                    {s.id_surat_masuk_ref && (
-                                      <div className="px-5 py-4 border-b border-slate-50">
-                                        <p className="text-xs text-slate-400 mb-2">Surat Masuk Terkait</p>
-                                        <button
-                                          onClick={() => setViewSurat({ type: "masuk", id: s.id_surat_masuk_ref?.id || s.id_surat_masuk_ref })}
-                                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                                          style={{ background: "#EFF6FF", color: "#2563EB" }}
-                                        >
-                                          <IconInbox /> Lihat Surat Masuk Asli
-                                        </button>
-                                      </div>
-                                    )}
+                                     {s.id_surat_masuk_ref && (
+                                       <div className="px-5 py-3">
+                                         <p className="text-xs text-slate-400 mb-2">Surat Masuk Terkait</p>
+                                         <button
+                                           onClick={() => setViewSurat({ type: "masuk", id: s.id_surat_masuk_ref?.id || s.id_surat_masuk_ref })}
+                                           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                                           style={{ background: "#EFF6FF", color: "#2563EB" }}
+                                         >
+                                           <IconInbox /> Lihat Surat Masuk Asli
+                                         </button>
+                                       </div>
+                                     )}
 
-<div className="px-5 py-4 border-t border-slate-50 flex flex-wrap gap-1.5">
+<div className="px-5 py-3 border-t border-slate-50 flex flex-wrap gap-1.5">
                                         <button
                                           onClick={() => {
                                             const params = new URLSearchParams({
@@ -760,6 +1095,7 @@ Apakah Anda yakin ingin menghapus surat dari "<strong>{deleteSuratConfirm.pihak}
                                               tanggal_kirim: s.tanggal_kirim || '',
                                               tujuan: s.tujuan || '',
                                               file_final_ttd: s.id_ttd && s.id_ttd.file_ttd ? JSON.stringify(s.id_ttd.file_ttd) : '',
+                                              nama_ttd: s.id_ttd?.id_user?.nama || '',
                                             })
                                             window.open(`/print-pdf?${params.toString()}`, '_blank')
                                           }}

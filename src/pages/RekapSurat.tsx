@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { TopBar } from "../components/TopBar"
 import { fetchSuratMasuk, fetchSuratKeluar } from "../lib/api"
 import { openPrintRekap } from "./PrintRekapSurat"
+import { exportRekapToXLSX } from "../lib/excelExport"
 
 const BULAN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
 const HARI = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"]
@@ -42,7 +43,7 @@ export function RekapSurat({ onNavigate }: { onNavigate?: (page: any, suratId?: 
     setLoading(false)
   }
 
-  useMemo(() => { loadData() }, [monthKey])
+  useEffect(() => { loadData() }, [monthKey])
 
   const smByDay = useMemo(() => {
     const map: Record<number, boolean> = {}
@@ -76,20 +77,13 @@ export function RekapSurat({ onNavigate }: { onNavigate?: (page: any, suratId?: 
     return d && d.getFullYear() === year && d.getMonth() + 1 === month
   }).length, [skData, year, month])
 
-  const handleExportCSV = () => {
-    const header = ["Jenis Surat", ...Array.from({ length: daysInMonth }, (_, i) => `${String(i + 1).padStart(2, "0")} ${getDayName(year, month, i + 1)}`), "Total"]
+  const handleExportXLSX = () => {
+    const headers = ["Jenis Surat", ...Array.from({ length: daysInMonth }, (_, i) => `${String(i + 1).padStart(2, "0")} ${getDayName(year, month, i + 1)}`), "Total"]
     const rows = [
-      ["Surat Masuk", ...Array.from({ length: daysInMonth }, (_, i) => smByDay[i + 1] ? "✓" : "-"), String(smTotal)],
-      ["Surat Keluar", ...Array.from({ length: daysInMonth }, (_, i) => skByDay[i + 1] ? "✓" : "-"), String(skTotal)],
+      ["Surat Masuk", ...Array.from({ length: daysInMonth }, (_, i) => smByDay[i + 1] ? "✓" : "-"), smTotal] as (string | number)[],
+      ["Surat Keluar", ...Array.from({ length: daysInMonth }, (_, i) => skByDay[i + 1] ? "✓" : "-"), skTotal] as (string | number)[],
     ]
-    const csv = [header, ...rows].map(r => r.join(";")).join("\n")
-    const blob = new Blob(["\ufeff" + csv], { type: "text/csv" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `rekap-surat-${monthKey}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    exportRekapToXLSX(`Rekap_Surat_${BULAN[month - 1]}_${year}`, headers, rows)
   }
 
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - 2 + i)
@@ -108,7 +102,7 @@ export function RekapSurat({ onNavigate }: { onNavigate?: (page: any, suratId?: 
             {years.map((y) => (<option key={y} value={y}>{y}</option>))}
           </select>
           <div className="flex-1" />
-          <button onClick={handleExportCSV} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-all">
+          <button onClick={handleExportXLSX} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-all">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
             Excel
           </button>
@@ -194,7 +188,7 @@ export function RekapSurat({ onNavigate }: { onNavigate?: (page: any, suratId?: 
             </div>
 
             {/* Legend */}
-            <div className="px-6 py-3 border-t border-slate-100 flex flex-wrap items-center gap-5 text-xs text-slate-500">
+            <div className="px-6 py-3 border-t border-slate-100 flex flex-wrap items-center gap-5 text-xs text-black">
               <span className="flex items-center gap-1.5">
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 text-red-600 font-bold text-[10px]">✓</span> Ada Surat Masuk
               </span>
@@ -202,10 +196,10 @@ export function RekapSurat({ onNavigate }: { onNavigate?: (page: any, suratId?: 
                 <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-emerald-100 text-emerald-600 font-bold text-[10px]">✓</span> Ada Surat Keluar
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="text-slate-200 font-bold">–</span> Tidak ada surat
+                <span className="text-black font-bold">–</span> Tidak ada surat
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded bg-slate-100 border border-slate-200" /> Weekend
+                <span className="w-3 h-3 rounded bg-black border border-black" /> Weekend
               </span>
             </div>
           </div>

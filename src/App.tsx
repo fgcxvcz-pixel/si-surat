@@ -12,6 +12,7 @@ import { KelolaData } from "./pages/KelolaData"
 import { ManajemenAkun } from "./pages/ManajemenAkun"
 import TandaTanganPage from "./pages/TandaTanganPage"
 import { RekapSurat } from "./pages/RekapSurat"
+import AuditLogsPage from "./pages/AuditLogsPage"
 
 // ── App Shell ────────────────────────────────────────────────────────────────
 export default function App() {
@@ -20,16 +21,16 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [userInfo, setUserInfo] = useState<{ id: string | null; name: string; role: string; avatar: string }>({ id: null, name: "Pengguna", role: "-", avatar: "P" })
   const [isLoading, setIsLoading] = useState(true)
-  
+
   // State untuk edit surat
   const [editSuratType, setEditSuratType] = useState<"masuk" | "keluar" | null>(null)
   const [editSuratId, setEditSuratId] = useState<string | null>(null)
-  
+
   // State untuk tindak lanjut
   const [tindakLanjutData, setTindakLanjutData] = useState<any>(null)
   const [suratMasukRefresh, setSuratMasukRefresh] = useState(0)
   const [openSuratId, setOpenSuratId] = useState<string | null>(null)
-  
+
   // Show sidebar on mount
   React.useEffect(() => {
     setSidebarCollapsed(false)
@@ -38,8 +39,9 @@ export default function App() {
   React.useEffect(() => {
     const savedAuth = localStorage.getItem("isAuthed")
     const savedPage = localStorage.getItem("currentPage")
-    
-    if (savedAuth === "true") {
+    const savedToken = localStorage.getItem("token")
+
+    if (savedAuth === "true" && savedToken) {
       setAuthed(true)
       setPage((savedPage as Page) || "dashboard")
       const savedUser = localStorage.getItem("userInfo")
@@ -47,8 +49,55 @@ export default function App() {
         setUserInfo(JSON.parse(savedUser))
       }
       loadMasterDataCache().catch(console.error)
+
+      // Validasi session ke server — jika user sudah tidak ada (mis. DB reseed), force logout
+      ;(async () => {
+        try {
+          const { getToken } = await import("./lib/http")
+          const token = getToken()
+          if (!token) throw new Error("no token")
+          const res = await fetch(`${(import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "")}/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+          if (!res.ok) throw new Error("session invalid")
+          const data = await res.json()
+          if (data?.user?.id != null) {
+            const info = {
+              id: data.user.id,
+              name: data.user.nama || "Pengguna",
+              role: data.user.role || "-",
+              avatar: (data.user.nama || "P").charAt(0).toUpperCase(),
+            }
+            setUserInfo(info)
+            localStorage.setItem("userInfo", JSON.stringify(info))
+          }
+        } catch {
+          setAuthed(false)
+          setPage("login")
+          setUserInfo({ id: null, name: "Pengguna", role: "-", avatar: "P" })
+          localStorage.removeItem("isAuthed")
+          localStorage.removeItem("userInfo")
+          localStorage.removeItem("currentPage")
+          localStorage.removeItem("token")
+        }
+      })()
+    } else {
+      localStorage.removeItem("isAuthed")
+      localStorage.removeItem("userInfo")
+      localStorage.removeItem("currentPage")
+      localStorage.removeItem("token")
     }
     setIsLoading(false)
+  }, [])
+
+  React.useEffect(() => {
+    const onExpired = () => {
+      setAuthed(false)
+      setPage("login")
+      setUserInfo({ id: null, name: "Pengguna", role: "-", avatar: "P" })
+    }
+    window.addEventListener("auth:expired", onExpired)
+    return () => window.removeEventListener("auth:expired", onExpired)
   }, [])
 
   const handleLogin = (user?: { id?: string; nama?: string; role?: string | null }) => {
@@ -72,6 +121,7 @@ export default function App() {
     localStorage.removeItem("isAuthed")
     localStorage.removeItem("currentPage")
     localStorage.removeItem("userInfo")
+    localStorage.removeItem("token")
   }
 
   const handlePageChange = (newPage: Page, suratId?: string) => {
@@ -145,19 +195,20 @@ export default function App() {
         />
       ) : (
         <>
-          {page === "dashboard" && <Dashboard onNavigate={handlePageChange} />}
-          {page === "surat-masuk" && <SuratMasuk
-            onEditClick={(id) => { setEditSuratType("masuk"); setEditSuratId(id); setPage("edit-surat"); }}
-            onTindakLanjut={(data) => { setTindakLanjutData(data); setPage("tambah-surat-keluar"); }}
-            refreshTrigger={suratMasukRefresh}
-            initialDetailId={openSuratId}
-            onNavigate={handlePageChange}
-          />}
-          {page === "surat-keluar" && <SuratKeluar onEditClick={(id) => { setEditSuratType("keluar"); setEditSuratId(id); setPage("edit-surat"); }} initialDetailId={openSuratId} onNavigate={handlePageChange} />}
-          {page === "manajemen-akun" && <ManajemenAkun onNavigate={handlePageChange} />}
-          {page === "master-data" && <KelolaData onNavigate={handlePageChange} />}
-          {page === "tanda-tangan" && <TandaTanganPage />}
-          {page === "rekap-surat" && <RekapSurat onNavigate={handlePageChange} />}
+           {page === "dashboard" && <Dashboard onNavigate={handlePageChange} />}
+           {page === "surat-masuk" && <SuratMasuk
+             onEditClick={(id) => { setEditSuratType("masuk"); setEditSuratId(id); setPage("edit-surat"); }}
+             onTindakLanjut={(data) => { setTindakLanjutData(data); setPage("tambah-surat-keluar"); }}
+             refreshTrigger={suratMasukRefresh}
+             initialDetailId={openSuratId}
+             onNavigate={handlePageChange}
+           />}
+           {page === "surat-keluar" && <SuratKeluar onEditClick={(id) => { setEditSuratType("keluar"); setEditSuratId(id); setPage("edit-surat"); }} initialDetailId={openSuratId} onNavigate={handlePageChange} />}
+           {page === "manajemen-akun" && <ManajemenAkun onNavigate={handlePageChange} />}
+           {page === "master-data" && <KelolaData onNavigate={handlePageChange} />}
+           {page === "tanda-tangan" && <TandaTanganPage />}
+           {page === "rekap-surat" && <RekapSurat onNavigate={handlePageChange} />}
+           {page === "audit-logs" && <AuditLogsPage />}
         </>
       )}
     </div>

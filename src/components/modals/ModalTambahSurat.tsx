@@ -113,20 +113,8 @@ export function ModalTambahSurat({
    const handleSave = async (e: React.FormEvent, gotoKeluar = false) => {
      e.preventDefault()
      setError("")
-     console.log("=== DEBUG FORM SUBMIT ===")
-     console.log("Form values:")
-     console.log("  nomorSurat:", nomorSurat)
-     console.log("  tanggal:", tanggal)
-     console.log("  pihak:", pihak)
-     console.log("  perihal:", perihal)
-     console.log("  isiSurat:", JSON.stringify(isiSurat))
-     console.log("  isiSurat length:", isiSurat.length)
-     console.log("  isiSurat isEmpty:", isiSurat === "")
-     console.log("  kategori:", kategori)
-     console.log("  type:", type)
-     console.log("======================")
-      
-      if (!initialData) {
+
+     if (!initialData) {
         // Validasi ketat untuk surat baru
         if (!nomorSurat || !tanggal || !pihak || !perihal) {
           setError("Semua field wajib diisi")
@@ -176,26 +164,22 @@ export function ModalTambahSurat({
            jenis_surat: jenisSurat,
              status_tindak_lanjut: "tidak",
          })
-       } else {
-          let finalNomor = nomorSurat || undefined
-          if (!finalNomor && jenisSurat && tanggal) {
-           finalNomor = await generateNomorSuratKeluar(jenisSurat)
-         }
-         suratData = await createSuratKeluar({
-           id_user: getCurrentUserId(),
-           nomor_surat: finalNomor,
-           tujuan: pihak,
-           folder: folder || null,
-           perihal,
-           jenis_surat: jenisSurat,
-           isi_surat: isiSurat,
-           kategori,
-           tanggal_kirim: new Date(tanggal).toISOString(),
-           file_draft: fileLampiran,
-            status_approval: "menunggu",
-            id_surat_masuk_ref: idSuratMasukRef || null,
-         })
-       }
+        } else {
+          // Nomor digenerate di server (GET_LOCK) — jangan dikirim dari client
+          suratData = await createSuratKeluar({
+            id_user: getCurrentUserId(),
+            tujuan: pihak,
+            folder: folder || null,
+            perihal,
+            jenis_surat: jenisSurat,
+            isi_surat: isiSurat,
+            kategori,
+            tanggal_kirim: new Date(tanggal).toISOString(),
+            file_draft: fileLampiran,
+             status_approval: "menunggu",
+             id_surat_masuk_ref: idSuratMasukRef || null,
+          })
+        }
 
         if (suratData) {
           // Jika tindak lanjut dicentang, tandai & buat reminder
@@ -217,21 +201,12 @@ export function ModalTambahSurat({
             }
           }
 
-          // Jika surat keluar dibuat sebagai balasan, update status surat masuk ke menunggu_approval
-          if (type === "keluar" && idSuratMasukRef) {
-            try {
-              await updateSuratMasukStatus(idSuratMasukRef, "menunggu_approval")
-            } catch (err) {
-              console.error("Error updating surat masuk status:", err)
-            }
-          }
-
-          setSaved(true)
-          setTimeout(() => {
-            onClose()
-            onSaved?.()
-          }, 800)
-       }
+           setSaved(true)
+           setTimeout(() => {
+             onClose()
+             onSaved?.()
+           }, 800)
+        }
        } catch (err: any) {
         console.error("Error saving surat:", err)
           setError("Gagal menyimpan surat: " + (err?.message || err?.error?.message || JSON.stringify(err)))

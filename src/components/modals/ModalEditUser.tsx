@@ -25,8 +25,9 @@ export function ModalEditUser({
     const loadRoles = async () => {
       try {
         const data = await fetchRoles()
-        setRoles(data)
-        if (!idRole && data.length > 0) setIdRole(data[0].id)
+        const filtered = data.filter(r => r.nama_role !== "Super Admin")
+        setRoles(filtered)
+        if (!idRole && filtered.length > 0) setIdRole(filtered[0].id)
       } catch (err) {
         console.error("Error fetching roles:", err)
       }

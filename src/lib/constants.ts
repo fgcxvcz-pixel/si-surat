@@ -1,7 +1,8 @@
+import { resolveFileUrl } from "./http"
 import { fetchJenisSurat, fetchJenisSuratWithKode, fetchKategori } from "./api"
 
 // ── Types ────────────────────────────────────────────────────────────────────
-export type Page = "login" | "lupa-password" | "dashboard" | "surat-masuk" | "surat-keluar" | "manajemen-akun" | "master-data" | "tanda-tangan" | "rekap-surat" | "edit-surat" | "tambah-surat-keluar" | "success"
+export type Page = "login" | "lupa-password" | "dashboard" | "surat-masuk" | "surat-keluar" | "manajemen-akun" | "master-data" | "tanda-tangan" | "rekap-surat" | "audit-logs" | "edit-surat" | "tambah-surat-keluar" | "success"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 export const currentMonthKey = () => {
@@ -15,6 +16,36 @@ export const inMonth = (dateStr: string | undefined, month: string) => {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}` === month
 }
 
+export const inDateRange = (dateStr: string | undefined, from: string, to: string) => {
+  const t = dateStr ? new Date(dateStr) : null
+  if (!t || isNaN(t.getTime())) return false
+  if (from) {
+    const f = new Date(from)
+    if (t < f) return false
+  }
+  if (to) {
+    const end = new Date(to)
+    end.setHours(23, 59, 59, 999)
+    if (t > end) return false
+  }
+  return true
+}
+
+export const isSuperAdmin = (role: string | null | undefined) =>
+  role === "Super Admin" || role?.includes("Super Admin") || false
+
+export const isKepalaRole = (role: string | null | undefined) =>
+  role === "Kepala" || role === "Kepala Bagian" || role?.includes("Kepala") || false
+
+export const isAdminRole = (role: string | null | undefined) =>
+  role === "Admin" || role === "Super Admin" || role?.includes("Admin") || false
+
+export const getReminderStatusForRole = (role: string | null | undefined) => {
+  if (isAdminRole(role)) return ["menunggu_dibuat", "menunggu_approval"]
+  if (isKepalaRole(role)) return ["menunggu_approval"]
+  return ["menunggu"]
+}
+
 export const getCurrentUserId = (): string => {
   const saved = localStorage.getItem("userInfo")
   if (saved) {
@@ -24,11 +55,16 @@ export const getCurrentUserId = (): string => {
   return ""
 }
 
-export const fileApiUrl = (p: string) => {
-  if (!p) return ""
-  if (p.startsWith("http")) return p
-  const FILE_SERVER = `http://${window.location.hostname}:5000`
-  return `${FILE_SERVER}/uploads/${encodeURIComponent(p)}`
+export const fileApiUrl = (p: string) => resolveFileUrl(p)
+
+export function canManageFolder(): boolean {
+  try {
+    const saved = localStorage.getItem("userInfo")
+    const role: string = saved ? JSON.parse(saved).role : ""
+    return role === "Admin" || role === "Super Admin" || role.includes("Super Admin")
+  } catch {
+    return false
+  }
 }
 
 // ── Nomor Surat Constants ───────────────────────────────────────────────────

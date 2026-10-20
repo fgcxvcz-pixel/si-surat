@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react"
 import { fetchSuratKeluar, fetchSuratMasuk, fetchReminders as apiFetchReminders } from "../lib/api"
-import { IconBell } from "./Icons"
+import { isSuperAdmin, isKepalaRole } from "../lib/constants"
+import { IconBell, IconPendingDibalas, IconMenungguApproval, IconSelesai, IconTerlewat } from "./Icons"
 
 export function TopBar({ title, subtitle, onNavigate, refreshTrigger }: { title: string; subtitle: string; onNavigate?: (page: any, suratId?: string) => void; refreshTrigger?: number }) {
   const userInfo = useMemo(() => {
@@ -8,8 +9,8 @@ export function TopBar({ title, subtitle, onNavigate, refreshTrigger }: { title:
     return saved ? JSON.parse(saved) : null
   }, [])
   const avatar = userInfo?.avatar || "P"
-  const userRole = (userInfo?.role || "").toLowerCase()
-  const isKepala = userRole.includes("kepala")
+  const isKepala = isKepalaRole(userInfo?.role)
+  const isSuper = isSuperAdmin(userInfo?.role)
 
   const [showDropdown, setShowDropdown] = useState(false)
   const [tindakLanjutList, setTindakLanjutList] = useState<any[]>([])
@@ -18,24 +19,26 @@ export function TopBar({ title, subtitle, onNavigate, refreshTrigger }: { title:
   React.useEffect(() => {
     const fetchData = async () => {
       try {
-        if (isKepala) {
+        const keluarList: any[] = []
+        const masukList: any[] = []
+
+        if (isKepala || isSuper) {
           const keluarData = await fetchSuratKeluar()
-          const menunggu = keluarData.filter((s: any) => s.status_approval === "menunggu" && s.id_user?.id !== userInfo?.id)
-          setTindakLanjutList(menunggu)
-        } else {
+          keluarData.filter((s: any) => s.status_approval === "menunggu" && s.id_user?.id !== userInfo?.id).forEach((s: any) => keluarList.push(s))
+        }
+        if (!isKepala || isSuper) {
           const [masukResult, allReminders] = await Promise.all([fetchSuratMasuk(), apiFetchReminders()])
-          const masuk = { data: masukResult }
-          const tindakLanjut = masuk.data.filter((s: any) => {
+          masukResult.filter((s: any) => {
             if (s.status_tindak_lanjut !== "menunggu" && s.status_tindak_lanjut !== "menunggu_approval") return false
             const reminder = allReminders.find((r: any) => {
               const rSmId = typeof r.id_surat_masuk === 'object' ? r.id_surat_masuk?.id : r.id_surat_masuk
               return rSmId === s.id
             })
             return !reminder || reminder.status !== "selesai"
-          })
-          setTindakLanjutList(tindakLanjut)
+          }).forEach((s: any) => masukList.push(s))
           setReminders(allReminders)
         }
+        setTindakLanjutList([...keluarList, ...masukList])
       } catch (err) {
         console.error("Error fetching bell data:", err)
       }
@@ -72,26 +75,26 @@ export function TopBar({ title, subtitle, onNavigate, refreshTrigger }: { title:
         <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden z-50">
           <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
             <h3 className="text-sm font-semibold text-slate-900">
-              {isKepala ? "Menunggu Persetujuan" : "Surat Tindak Lanjut"}
+              {isSuper ? "Notifikasi" : isKepala ? "Menunggu Persetujuan" : "Surat Tindak Lanjut"}
             </h3>
             <button onClick={() => setShowDropdown(false)} className="text-slate-400 hover:text-slate-600 text-xs">✕</button>
           </div>
           {tindakLanjutList.length === 0 ? (
             <div className="px-5 py-6 text-center text-sm text-slate-400">
-              {isKepala ? "Tidak ada surat menunggu persetujuan" : "Tidak ada surat tindak lanjut"}
+              {isSuper ? "Tidak ada notifikasi" : isKepala ? "Tidak ada surat menunggu persetujuan" : "Tidak ada surat tindak lanjut"}
             </div>
           ) : (
             <div className="max-h-64 overflow-y-auto divide-y divide-slate-50">
               {tindakLanjutList.map((s) => {
-                if (isKepala) {
+                if (s.tujuan) {
                   return (
-                    <div key={s.id} className="px-5 py-3 hover:bg-blue-50 transition-colors flex items-start gap-3 cursor-pointer" onClick={() => { setShowDropdown(false); onNavigate?.("surat-keluar", s.id) }}>
-                      <span className="text-xs mt-0.5">⏳</span>
+                    <div key={`keluar-${s.id}`} className="px-5 py-3 hover:bg-blue-50 transition-colors flex items-start gap-3 cursor-pointer" onClick={() => { setShowDropdown(false); onNavigate?.("surat-keluar", s.id) }}>
+                      <span className="text-xs mt-0.5" ><IconMenungguApproval /></span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-slate-800 truncate">{s.tujuan}</p>
                         <p className="text-xs text-slate-500 truncate">{s.perihal}</p>
                       </div>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: "#FEF3C7", color: "#D97706" }}>Menunggu</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0" style={{ background: "#EFF6FF", color: "#2563EB" }}>Menunggu Approval</span>
                     </div>
                   )
                 } else {
@@ -101,13 +104,23 @@ export function TopBar({ title, subtitle, onNavigate, refreshTrigger }: { title:
                   })
                   const isDone = reminder && reminder.status === 'selesai'
                   const isOverdue = reminder && !isDone && new Date(reminder.tanggal_batas) < new Date()
-                  const badge = isDone
-                    ? { icon: "✅", label: "Selesai", bg: "#ECFDF5", color: "#059669" }
-                    : isOverdue
-                      ? { icon: "⚠️", label: "Terlewat", bg: "#FEF2F2", color: "#DC2626" }
-                      : { icon: "⏳", label: "Menunggu", bg: "#FEF3C7", color: "#D97706" }
+                  let badge
+
+                  if (isDone) {
+                    badge = { icon: <IconSelesai />, label: "Selesai", bg: "#ECFDF5", color: "#059669" }
+                  } else if (isOverdue) {
+                    badge = { icon: <IconTerlewat />, label: "Terlewat", bg: "#FEF2F2", color: "#DC2626" }
+                  } else if (s.status_tindak_lanjut === "menunggu_approval") {
+                    badge = { icon: <IconMenungguApproval />, label: "Menunggu Approval", bg: "#EFF6FF", color: "#2563EB" }
+                  } else if (s.status_tindak_lanjut === "menunggu" ) {
+                    badge = { icon: <IconPendingDibalas />, label: "Menunggu Dibalas", bg: "#FEF3C7", color: "#D97706" }
+                  } else if (s.status_tindak_lanjut === "menunggu" ) {
+                    badge = { icon: <IconMenungguApproval />, label: "Menunggu Approval", bg: "#EFF6FF", color: "#2563EB" }
+                  } else {
+                    badge = { icon: <IconPendingDibalas />, label: "Menunggu", bg: "#FEF3C7", color: "#D97706" }
+                  }
                   return (
-                    <div key={s.id} className="px-5 py-3 hover:bg-blue-50 transition-colors flex items-start gap-3 cursor-pointer" onClick={() => { setShowDropdown(false); onNavigate?.("surat-masuk", s.id) }}>
+                    <div key={`masuk-${s.id}`} className="px-5 py-3 hover:bg-blue-50 transition-colors flex items-start gap-3 cursor-pointer" onClick={() => { setShowDropdown(false); onNavigate?.("surat-masuk", s.id) }}>
                       <span className="text-xs mt-0.5">{badge.icon}</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium text-slate-800 truncate">{s.pengirim}</p>

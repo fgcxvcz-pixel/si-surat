@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { IconMail } from "../components/Icons"
-import { fetchUserByUsername, sendOtpByEmail, verifyOtp, resetPassword } from "../lib/api"
+import { forgotPassword, resetPasswordOtp } from "../lib/api"
 import { usePasswordValidation } from "../hooks/usePasswordValidation"
 import { PasswordValidationLabel } from "../components/PasswordValidationLabel"
 
@@ -9,24 +9,26 @@ type Step = "username" | "otp" | "password"
 export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState<Step>("username")
   const [username, setUsername] = useState("")
-  const [email, setEmail] = useState("")
   const [otp, setOtp] = useState("")
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [info, setInfo] = useState("")
   const passwordValidation = usePasswordValidation(newPassword)
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!username) { setError("Username wajib diisi"); return }
+    setInfo("")
+    if (!username) {
+      setError("Username wajib diisi")
+      return
+    }
     setLoading(true)
     try {
-      const user = await fetchUserByUsername(username)
-      if (!user?.email) { setError("Email tidak ditemukan untuk username ini"); setLoading(false); return }
-      setEmail(user.email)
-      await sendOtpByEmail(user.email)
+      const data = await forgotPassword(username)
+      setInfo(data.message || "Jika username terdaftar, kode OTP telah dikirim ke email.")
       setStep("otp")
     } catch (err: any) {
       setError(err.message || "Gagal mengirim OTP")
@@ -38,13 +40,34 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!otp) { setError("Kode OTP wajib diisi"); return }
+    if (!otp) {
+      setError("Kode OTP wajib diisi")
+      return
+    }
     setLoading(true)
     try {
-      await verifyOtp(email, otp)
+      // Verifikasi OTP + password baru digabung di step berikutnya;
+      // di sini kita hanya cek format lalu lanjut (server validasi saat reset).
+      if (!/^\d{6}$/.test(otp.trim())) {
+        setError("Kode OTP harus 6 digit angka")
+        setLoading(false)
+        return
+      }
       setStep("password")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResend = async () => {
+    setError("")
+    setInfo("")
+    setLoading(true)
+    try {
+      const data = await forgotPassword(username)
+      setInfo(data.message || "Kode baru dikirim jika username terdaftar.")
     } catch (err: any) {
-      setError(err.message || "Kode OTP salah atau sudah kedaluwarsa")
+      setError(err.message || "Gagal mengirim ulang OTP")
     } finally {
       setLoading(false)
     }
@@ -53,12 +76,21 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!newPassword || !confirmPassword) { setError("Semua field wajib diisi"); return }
-    if (newPassword.length < 8) { setError("Password minimal 8 karakter"); return }
-    if (newPassword !== confirmPassword) { setError("Password tidak cocok"); return }
+    if (!newPassword || !confirmPassword) {
+      setError("Semua field wajib diisi")
+      return
+    }
+    if (newPassword.length < 8) {
+      setError("Password minimal 8 karakter")
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError("Password tidak cocok")
+      return
+    }
     setLoading(true)
     try {
-      await resetPassword(newPassword)
+      await resetPasswordOtp({ username, otp: otp.trim(), newPassword })
       setStep("username")
       onBack()
     } catch (err: any) {
@@ -76,17 +108,17 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
     },
     otp: {
       title: "Verifikasi OTP",
-      subtitle: `Kode OTP telah dikirim ke ${email}`,
-      leftDesc: "Masukkan kode OTP yang telah dikirim ke email Anda. Kode berlaku selama beberapa menit.",
+      subtitle: "Masukkan kode 6 digit dari email Anda",
+      leftDesc: "Buka email dari SiSurat, lalu masukkan kode OTP. Kode berlaku 15 menit.",
     },
     password: {
       title: "Password Baru",
       subtitle: "Masukkan password baru Anda",
-      leftDesc: "Buat password baru yang kuat untuk akun Anda. Pastikan password minimal 8 karakter.",
+      leftDesc: "Buat password baru yang kuat. Minimal 8 karakter.",
     },
   }
 
-  const info = stepInfo[step]
+  const info2 = stepInfo[step]
 
   return (
     <div className="min-h-screen flex" style={{ fontFamily: "Inter, sans-serif", background: "#F1F5F9" }}>
@@ -99,7 +131,7 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
             <span className="text-white font-semibold text-lg tracking-tight">SiSurat</span>
           </div>
           <h1 className="text-4xl font-bold text-white leading-tight mb-4">Reset<br />Password Anda</h1>
-          <p className="text-slate-400 leading-relaxed" style={{ fontSize: "0.9375rem" }}>{info.leftDesc}</p>
+          <p className="text-slate-400 leading-relaxed" style={{ fontSize: "0.9375rem" }}>{info2.leftDesc}</p>
         </div>
         <div className="rounded-xl p-5" style={{ background: "rgba(255,255,255,0.06)" }}>
           <p className="text-slate-400 text-sm leading-relaxed">Jika Anda tidak menerima email dalam 5 menit, periksa folder spam atau hubungi administrator sistem.</p>
@@ -109,8 +141,8 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
         <div className="w-full max-w-md">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10">
             <div className="mb-8">
-              <h2 className="text-2xl font-bold text-slate-900 mb-1">{info.title}</h2>
-              <p className="text-slate-500 text-sm">{info.subtitle}</p>
+              <h2 className="text-2xl font-bold text-slate-900 mb-1">{info2.title}</h2>
+              <p className="text-slate-500 text-sm">{info2.subtitle}</p>
             </div>
 
             {step === "username" && (
@@ -128,17 +160,27 @@ export function LupaPasswordPage({ onBack }: { onBack: () => void }) {
 
             {step === "otp" && (
               <form onSubmit={handleVerifyOtp} className="space-y-5">
+                {info && (
+                  <div className="px-4 py-3 rounded-lg bg-blue-50 border border-blue-200">
+                    <span className="text-blue-800 text-sm">{info}</span>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1.5">Kode OTP</label>
-                  <input type="text" value={otp} onChange={(e) => setOtp(e.target.value)} placeholder="Masukkan kode OTP" className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-slate-900 text-sm placeholder-slate-400 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-100 tracking-widest text-center text-lg font-mono" maxLength={8} />
+                  <input type="text" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="6 digit kode" maxLength={6} className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-slate-900 text-sm placeholder-slate-400 outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-100 tracking-widest text-center text-lg font-mono" />
                 </div>
                 {error && (<div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-300"><span className="text-red-700 text-sm">{error}</span></div>)}
-                <button type="submit" disabled={loading || !otp} className="w-full py-2.5 rounded-lg font-semibold text-white text-sm transition-all" style={{ background: loading || !otp ? "#93C5FD" : "#2563EB", cursor: loading || !otp ? "not-allowed" : "pointer" }}>
-                  {loading ? "Memverifikasi..." : "Verifikasi OTP"}
+                <button type="submit" disabled={loading || otp.length !== 6} className="w-full py-2.5 rounded-lg font-semibold text-white text-sm transition-all" style={{ background: loading || otp.length !== 6 ? "#93C5FD" : "#2563EB", cursor: loading || otp.length !== 6 ? "not-allowed" : "pointer" }}>
+                  {loading ? "Memverifikasi..." : "Lanjut"}
                 </button>
-                <button type="button" onClick={() => { setStep("username"); setError(""); setOtp("") }} className="w-full text-center text-sm font-medium" style={{ color: "#2563EB" }}>
-                  ← Kembali
-                </button>
+                <div className="flex gap-3">
+                  <button type="button" onClick={handleResend} disabled={loading} className="flex-1 text-center text-sm font-medium py-2 rounded-lg border border-slate-200" style={{ color: "#2563EB" }}>
+                    Kirim ulang
+                  </button>
+                  <button type="button" onClick={() => { setStep("username"); setError(""); setInfo(""); setOtp("") }} className="flex-1 text-center text-sm font-medium py-2" style={{ color: "#64748B" }}>
+                    ← Kembali
+                  </button>
+                </div>
               </form>
             )}
 

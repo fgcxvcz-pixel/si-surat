@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { fetchSuratMasuk, fetchSuratKeluar } from "../lib/api"
 import { inMonth } from "../lib/constants"
+import { exportRekapToXLSX } from "../lib/excelExport"
 import { TopBar } from "../components/TopBar"
 import { IconMailIn, IconMailOut, IconMailStack } from "../components/Icons"
 
@@ -11,53 +12,6 @@ const COLS = [
   { key: "masuk", label: "Total Surat Masuk", color: "#2563EB", bg: "#EFF6FF" },
   { key: "keluar", label: "Total Surat Keluar", color: "#059669", bg: "#ECFDF5" },
 ]
-
-function exportToCSV(periode: string, data: RekapRow[]) {
-  const header = ["Periode", "Surat Masuk", "Surat Keluar", "Total"]
-  const rows = data.map((r) => [
-    r.periode,
-    r.masuk,
-    r.keluar,
-    r.masuk + r.keluar,
-  ])
-  const totalRow = [
-    "TOTAL",
-    data.reduce((s, r) => s + r.masuk, 0),
-    data.reduce((s, r) => s + r.keluar, 0),
-    data.reduce((s, r) => s + r.masuk + r.keluar, 0),
-  ]
-  const csv = [header, ...rows, totalRow].map((r) => r.join(";")).join("\n")
-  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `Rekap_Surat_${periode.replace(/ /g, "_")}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-export function exportSuratToCSV(filename: string, data: any[], fields: string[]) {
-  const header = fields.join(",")
-  const rows = data.map((r) =>
-    fields
-      .map((f) => {
-        let v = r[f]
-        if (v instanceof Date || (typeof v === "string" && !isNaN(Date.parse(v)))) {
-          v = new Date(v).toLocaleDateString("id-ID")
-        }
-        return `"${String(v ?? "").replace(/"/g, '""')}"`
-      })
-      .join(","),
-  )
-  const csv = [header, ...rows].join("\n")
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = `${filename}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
-}
 
 const PERIODE_KEYS = ["Minggu Ini", "Bulan Ini", "Kuartal Ini"] as const
 type PeriodeKey = (typeof PERIODE_KEYS)[number]
@@ -73,14 +27,13 @@ function buildRekap(periode: PeriodeKey, masuk: any[], keluar: any[]): RekapRow[
   }
 
   const now = new Date()
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
   const weekKey = (d: Date) => {
     const diff = (d.getDay() + 6) % 7
     const monday = new Date(d)
     monday.setDate(d.getDate() - diff)
     return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, "0")}-${String(monday.getDate()).padStart(2, "0")}`
   }
-  const inMonth = (d: Date) =>
-    d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
 
   for (const s of masuk) {
     const d = new Date(s.tanggal_terima || s.created_at)
@@ -90,7 +43,7 @@ function buildRekap(periode: PeriodeKey, masuk: any[], keluar: any[]): RekapRow[
       bump(["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][(d.getDay() + 6) % 7], "masuk")
       if (s.status_tindak_lanjut === "selesai") rows.get(["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][(d.getDay() + 6) % 7])!.selesai += 1
     } else if (periode === "Bulan Ini") {
-      if (!inMonth(d)) continue
+      if (!inMonth(s.tanggal_terima, monthKey)) continue
       bump(`Minggu ${Math.ceil(d.getDate() / 7)}`, "masuk")
       if (s.status_tindak_lanjut === "selesai") rows.get(`Minggu ${Math.ceil(d.getDate() / 7)}`)!.selesai += 1
     } else {
@@ -108,7 +61,7 @@ function buildRekap(periode: PeriodeKey, masuk: any[], keluar: any[]): RekapRow[
       bump(["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][(d.getDay() + 6) % 7], "keluar")
       if (s.status_approval === "disetujui") rows.get(["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"][(d.getDay() + 6) % 7])!.selesai += 1
     } else if (periode === "Bulan Ini") {
-      if (!inMonth(d)) continue
+      if (!inMonth(s.tanggal_kirim, monthKey)) continue
       bump(`Minggu ${Math.ceil(d.getDate() / 7)}`, "keluar")
       if (s.status_approval === "disetujui") rows.get(`Minggu ${Math.ceil(d.getDate() / 7)}`)!.selesai += 1
     } else {
@@ -201,7 +154,12 @@ function RekapPeriodik() {
             ))}
           </div>
           <button
-            onClick={() => exportToCSV(periode, data)}
+            onClick={() => {
+              const headers = ["Periode", "Surat Masuk", "Surat Keluar", "Total"]
+              const rows = data.map((r) => [r.periode, r.masuk, r.keluar, r.masuk + r.keluar])
+              const totalRow = ["TOTAL", data.reduce((s, r) => s + r.masuk, 0), data.reduce((s, r) => s + r.keluar, 0), data.reduce((s, r) => s + r.masuk + r.keluar, 0)]
+              exportRekapToXLSX(`Rekap_Surat_${periode.replace(/ /g, "_")}`, headers, rows, totalRow)
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors whitespace-nowrap"
           >
             <svg

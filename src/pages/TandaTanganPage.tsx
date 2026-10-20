@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { fetchAllTandaTangan, createTandaTangan, setTandaTanganActive, deleteTandaTangan, getFileUrl } from "../lib/api"
-import { supabase } from "../lib/supabase"
+import { getCurrentUserId, isSuperAdmin, isKepalaRole } from "../lib/constants"
 
 export default function TandaTanganPage() {
   const [ttdList, setTtdList] = useState<any[]>([])
@@ -9,17 +9,21 @@ export default function TandaTanganPage() {
   const [deleting, setDeleting] = useState<string | null>(null)
   const [error, setError] = useState("")
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [myTtd, setMyTtd] = useState<any | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const userInfo = localStorage.getItem("userInfo")
   let userRole = ""
   try { userRole = userInfo ? (JSON.parse(userInfo).role || "") : "" } catch {}
-  const isKepala = userRole === "Kepala" || userRole === "Kepala Bagian" || userRole.includes("Kepala")
+  const isKepala = isKepalaRole(userRole) || isSuperAdmin(userRole)
+  const currentUserId = getCurrentUserId()
 
   const fetchTTD = async () => {
     try {
       const data = await fetchAllTandaTangan()
       setTtdList(data)
+      const own = data.find((t: any) => (t.id_user?.id ?? t.id_user) === currentUserId)
+      setMyTtd(own)
     } catch (err: any) {
       setError(err.message || "Gagal memuat data TTD")
     } finally {
@@ -45,10 +49,10 @@ export default function TandaTanganPage() {
     setUploading(true)
     setError("")
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error("User tidak terotentikasi")
+      const userId = getCurrentUserId()
+      if (!userId) throw new Error("User tidak terotentikasi")
 
-      await createTandaTangan(user.id, file)
+      await createTandaTangan(userId, file)
       await fetchTTD()
     } catch (err: any) {
       setError(err.message || "Gagal mengunggah TTD")
@@ -80,7 +84,23 @@ export default function TandaTanganPage() {
     }
   }
 
-  const activeTtd = ttdList.find((t) => t.is_aktif)
+  const formatFileSize = (bytes: number): string => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+  }
+
+  const getUploadDate = (timestamp: string): string => {
+    return new Date(timestamp).toLocaleDateString('id-ID', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: "#F8FAFC", fontFamily: "Inter, sans-serif" }}>
@@ -108,14 +128,14 @@ export default function TandaTanganPage() {
           <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Tanda Tangan Aktif</h2>
           {loading ? (
             <div className="text-center py-8 text-slate-400 text-sm">Memuat...</div>
-          ) : activeTtd ? (
+          ) : myTtd ? (
             <div className="flex items-center gap-6">
               <div className="w-48 h-24 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
-                <img src={getFileUrl(activeTtd.file_ttd?.path || "")} alt="TTD Aktif" className="max-w-full max-h-full object-contain" />
+                <img src={getFileUrl(myTtd.file_ttd?.path || "")} alt="TTD Aktif" className="max-w-full max-h-full object-contain" />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-900">{activeTtd.file_ttd?.nama}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{activeTtd.id_user?.nama}</p>
+                <p className="text-sm font-medium text-slate-900">{myTtd.file_ttd?.nama}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{myTtd.id_user?.nama}</p>
                 <span className="inline-block mt-2 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">Aktif</span>
               </div>
             </div>
@@ -127,43 +147,107 @@ export default function TandaTanganPage() {
           )}
         </div>
 
-        {/* Upload */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6">
-          <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Upload TTD Baru</h2>
-          <label className="flex flex-col items-center gap-3 px-6 py-8 rounded-xl border-2 border-dashed border-slate-300 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-all">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            <div className="text-center">
-              <p className="text-sm font-medium text-slate-600">
-                {uploading ? "Mengunggah..." : "Klik untuk memilih gambar"}
-              </p>
-              <p className="text-xs text-slate-400 mt-1">PNG atau JPG, maks. 2 MB</p>
+        {/* Upload / Already Uploaded Section */}
+        {!myTtd ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-6">
+            <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Upload TTD Baru</h2>
+            <label className="flex flex-col items-center gap-3 px-6 py-8 rounded-xl border-2 border-dashed border-slate-300 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition-all">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <div className="text-center">
+                <p className="text-sm font-medium text-slate-600">
+                  {uploading ? "Mengunggah..." : "Klik untuk memilih gambar"}
+                </p>
+                <p className="text-xs text-slate-400 mt-1">PNG atau JPG, maks. 2 MB</p>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/jpg"
+                className="hidden"
+                onChange={handleUpload}
+                disabled={uploading}
+              />
+            </label>
+            {error && (
+              <div className="mt-3 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200">
+                <span className="text-red-600 text-sm">{error}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider">✓ TTD Sudah Diunggah</h2>
+              <span className="inline-block px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">Aktif</span>
             </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/png,image/jpeg,image/jpg"
-              className="hidden"
-              onChange={handleUpload}
-              disabled={uploading}
-            />
-          </label>
-          {error && (
-            <div className="mt-3 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200">
-              <span className="text-red-600 text-sm">{error}</span>
+
+            {error && (
+              <div className="mb-4 px-4 py-2.5 rounded-lg bg-red-50 border border-red-200">
+                <span className="text-red-600 text-sm">{error}</span>
+              </div>
+            )}
+
+            <div className="bg-slate-50 p-4 rounded-lg mb-4 border border-slate-200">
+              <div className="mb-4">
+                <p className="text-xs text-slate-600 mb-2 font-medium">Preview:</p>
+                <div className="rounded-lg border border-slate-200 bg-white flex items-center justify-center overflow-hidden mx-auto" style={{ maxWidth: "320px", height: "200px" }}>
+                  <img
+                    src={getFileUrl(myTtd.file_ttd?.path || "")}
+                    alt="Tanda Tangan"
+                    className="max-w-sm h-auto object-contain"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-500 text-xs">Nama File:</p>
+                  <p className="font-medium text-slate-900 truncate">{myTtd.file_ttd?.nama}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500 text-xs">Ukuran:</p>
+                  <p className="font-medium text-slate-900">{formatFileSize(myTtd.file_ttd?.ukuran)}</p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-slate-500 text-xs">Tanggal Upload:</p>
+                  <p className="font-medium text-slate-900">{getUploadDate(myTtd.created_at)}</p>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+
+            <button
+              onClick={() => handleDelete(myTtd.id)}
+              disabled={deleting === myTtd.id}
+              className="w-full px-4 py-2.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-slate-400 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+            >
+              {deleting === myTtd.id ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Menghapus...
+                </>
+              ) : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  Hapus & Upload Ulang
+                </>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* All TTDs */}
         {ttdList.length > 0 && (
           <div className="bg-white rounded-2xl border border-slate-200 p-6">
-            <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Semua Tanda Tangan ({ttdList.length})</h2>
+            <h2 className="text-sm font-semibold text-slate-600 uppercase tracking-wider mb-4">Tanda Tangan Saya</h2>
             <div className="space-y-3">
-              {ttdList.map((ttd) => (
+              {ttdList.filter((t: any) => (t.id_user?.id ?? t.id_user) === currentUserId).map((ttd) => (
                 <div key={ttd.id} className="flex items-center gap-4 p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors">
                   <div
                     className="w-20 h-14 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden cursor-pointer shrink-0"

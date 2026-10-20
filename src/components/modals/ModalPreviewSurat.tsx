@@ -21,6 +21,7 @@ export function ModalPreviewSurat({
       tanggal_kirim: surat.tanggal_kirim || '',
       tujuan: surat.tujuan || '',
       file_final_ttd: surat.id_ttd && surat.id_ttd.file_ttd ? JSON.stringify(surat.id_ttd.file_ttd) : '',
+      nama_ttd: surat.id_ttd?.id_user?.nama || '',
     })
     window.open(`/print-pdf?${params.toString()}`, '_blank')
   }

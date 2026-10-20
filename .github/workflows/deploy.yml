@@ -1,0 +1,76 @@
+﻿name: Deploy SiSurat
+
+on:
+  push:
+    branches: [main, production]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_API_URL: /api
+
+      - name: Verify build output
+        run: |
+          [ -d dist ] && echo "Build successful" || exit 1
+          [ -f dist/index.html ] && echo "index.html exists" || exit 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p ${{ secrets.DEPLOY_PORT || 22 }} ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to VPS
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -p $DEPLOY_PORT $DEPLOY_USER@$DEPLOY_HOST << 'ENDSSH'
+          set -e
+          cd /var/www/sisurat
+          echo "[1/4] Pulling latest code..."
+          git pull origin main
+          echo "[2/4] Installing dependencies..."
+          npm ci
+          echo "[3/4] Restarting application..."
+          pm2 restart sisurat-api
+          echo "[4/4] Verifying deployment..."
+          sleep 2
+          curl -s http://127.0.0.1:3000/health || exit 1
+          echo "Deployment successful!"
+          ENDSSH
+
+      - name: Deployment notification
+        if: always()
+        run: echo "Deployment workflow completed"

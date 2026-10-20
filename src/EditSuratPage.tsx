@@ -21,7 +21,6 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
   const [saved, setSaved] = useState(false)
   const [folders, setFolders] = useState<string[]>([])
   const [nomorSurat, setNomorSurat] = useState("")
-  const [nomorManual, setNomorManual] = useState(false)
   const [tujuan, setTujuan] = useState("")
   const [tanggalKirim, setTanggalKirim] = useState("")
   const [jenisSurat, setJenisSurat] = useState("surat tugas")
@@ -31,6 +30,7 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
   const [suratLoaded, setSuratLoaded] = useState(false)
   const [jenisOptions, setJenisOptions] = useState<string[]>([])
   const [kategoriOptions, setKategoriOptions] = useState<string[]>([])
+  const [isFirstLoad, setIsFirstLoad] = useState(true)
 
   React.useEffect(() => {
     const load = async () => {
@@ -57,12 +57,19 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
     }
   }
 
-  // Fetch next nomor saat jenis surat BERUBAH atau setelah data loaded
+  // Fetch next nomor saat user UBAH jenis surat (hanya setelah form load pertama kali)
   React.useEffect(() => {
-    if (type === "keluar" && !nomorManual && suratLoaded) {
+    if (type === "keluar" && suratLoaded && !isFirstLoad) {
       fetchNextNomor(jenisSurat)
     }
-  }, [jenisSurat, suratLoaded])
+  }, [jenisSurat, suratLoaded, isFirstLoad])
+
+  // Mark selesai first load (jangan generate nomor saat form load)
+  React.useEffect(() => {
+    if (type === "keluar" && suratLoaded && isFirstLoad) {
+      setIsFirstLoad(false)
+    }
+  }, [suratLoaded, type, isFirstLoad])
 
   React.useEffect(() => {
     const fetchSurat = async () => {
@@ -77,11 +84,11 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
         
         if (type === "keluar") {
           setTujuan(s.tujuan || "")
-          setTanggalKirim(s.tanggal_kirim ? s.tanggal_kirim.split('T')[0] : "")
+          setTanggalKirim(s.tanggal_kirim ? String(s.tanggal_kirim).slice(0, 10) : "")
           setJenisSurat(s.jenis_surat || "surat tugas")
         } else {
           setPengirim(s.pengirim || "")
-          setTanggalTerima(s.tanggal_terima ? s.tanggal_terima.split('T')[0] : "")
+          setTanggalTerima(s.tanggal_terima ? String(s.tanggal_terima).slice(0, 10) : "")
           setJenisSuratMasuk(s.jenis_surat || "")
         }
       } catch (err) {
@@ -132,6 +139,9 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
       }
 
       const updates: any = {
+        nomor_surat: nomorSurat,
+        tujuan: tujuan,
+        pengirim: pengirim,
         perihal,
         isi_surat: isiSurat,
         kategori,
@@ -243,30 +253,23 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
             <div className="grid grid-cols-2 gap-5">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1.5">
-                  Nomor Surat {type === "keluar" && <span className="text-slate-400 font-normal">(otomatis, bisa diubah)</span>}
+                  Nomor Surat {type === "keluar" && <span className="text-slate-400 font-normal">(otomatis, ubah via jenis surat)</span>}
                 </label>
-                <input
-                  type="text"
-                  value={nomorSurat}
-                  onChange={(e) => {
-                    setNomorSurat(e.target.value)
-                    setNomorManual(true)
-                  }}
-                  placeholder="Contoh: 04.011/SSI-PCT/V/2026"
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
-                  style={{ fontFamily: type === "keluar" ? "JetBrains Mono, monospace" : "inherit" }}
-                />
-                {type === "keluar" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNomorManual(false)
-                      fetchNextNomor(jenisSurat)
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800 mt-1 transition-colors px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
+                {type === "keluar" ? (
+                  <div
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-900 flex items-center"
+                    style={{ fontFamily: "JetBrains Mono, monospace" }}
                   >
-                    ↻ Reset ke otomatis
-                  </button>
+                    {nomorSurat || "Nomor akan otomatis digenerate..."}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={nomorSurat}
+                    onChange={(e) => setNomorSurat(e.target.value)}
+                    placeholder="Contoh: 04.011/SSI-PCT/V/2026"
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all"
+                  />
                 )}
               </div>
 
@@ -352,7 +355,8 @@ export function EditSuratPage({ type, suratId, onClose, onSaved }: EditSuratPage
                     onChange={(e) => {
                       const newJenis = e.target.value
                       setJenisSurat(newJenis)
-                      if (!nomorManual) fetchNextNomor(newJenis)
+                      setIsFirstLoad(false)
+                      fetchNextNomor(newJenis)
                     }}
                     className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all bg-white"
                   >

@@ -4,11 +4,13 @@ import { IconPlus } from "../components/Icons"
 import { ModalTambahAkun } from "../components/modals/ModalTambahAkun"
 import { ModalGantiPassword } from "../components/modals/ModalGantiPassword"
 import { ModalEditUser } from "../components/modals/ModalEditUser"
-import { supabase } from "../lib/supabase"
+import { fetchUsers as apiFetchUsers, deleteUser as apiDeleteUser } from "../lib/api"
+import { isSuperAdmin, isKepalaRole } from "../lib/constants"
 
 const ROLE_COLORS: Record<string, { bg: string; text: string; iconBg: string; iconStroke: string }> = {
   "Admin": { bg: "bg-blue-50", text: "text-blue-700", iconBg: "bg-blue-100", iconStroke: "#2563EB" },
   "Kepala Bagian": { bg: "bg-purple-50", text: "text-purple-700", iconBg: "bg-purple-100", iconStroke: "#9333EA" },
+  "Super Admin": { bg: "bg-amber-50", text: "text-amber-700", iconBg: "bg-amber-100", iconStroke: "#D97706" },
 }
 const DEFAULT_ROLE_COLOR = { bg: "bg-slate-50", text: "text-slate-700", iconBg: "bg-slate-100", iconStroke: "#64748B" }
 
@@ -25,7 +27,7 @@ export function ManajemenAkun({ onNavigate }: { onNavigate?: (page: any, suratId
   const userInfo = localStorage.getItem("userInfo")
   let currentUserRole: string | null = null
   try { currentUserRole = userInfo ? JSON.parse(userInfo).role : null } catch { /* corrupted data */ }
-  const isAccessDenied = currentUserRole === "Kepala" || currentUserRole === "Kepala Bagian" || currentUserRole?.includes("Kepala")
+  const isAccessDenied = !isSuperAdmin(currentUserRole) && isKepalaRole(currentUserRole)
 
   const showToast = useCallback((type: "success" | "error", msg: string) => {
     setToast({ type, msg })
@@ -37,18 +39,20 @@ export function ManajemenAkun({ onNavigate }: { onNavigate?: (page: any, suratId
   const fetchUsers = async () => {
     try {
       setLoading(true)
-      const { data, error } = await supabase
-        .from("pengguna")
-        .select("id, username, nama, email, id_role:roles(id, nama_role)")
-      if (error) throw error
+      const data = await apiFetchUsers()
       setUsers(
-        (data ?? []).map((u: any) => ({
-          id: u.id,
-          username: u.username,
-          nama: u.nama,
-          email: u.email,
-          id_role: Array.isArray(u.id_role) ? u.id_role[0] : u.id_role,
-        }))
+        (data ?? [])
+          .filter((u: any) => {
+            const role = (Array.isArray(u.id_role) ? u.id_role[0] : u.id_role)?.nama_role
+            return role !== "Super Admin"
+          })
+          .map((u: any) => ({
+            id: u.id,
+            username: u.username,
+            nama: u.nama,
+            email: u.email,
+            id_role: Array.isArray(u.id_role) ? u.id_role[0] : u.id_role,
+          }))
       )
     } catch (err) {
       console.error("Error fetching users:", err)
@@ -68,8 +72,7 @@ export function ManajemenAkun({ onNavigate }: { onNavigate?: (page: any, suratId
     if (!deleteTarget) return
     setDeleting(true)
     try {
-      const { error } = await supabase.from("pengguna").delete().eq("id", deleteTarget.id)
-      if (error) throw error
+      await apiDeleteUser(deleteTarget.id)
       setUsers(users.filter(u => u.id !== deleteTarget.id))
       showToast("success", `Akun "${deleteTarget.username}" berhasil dihapus`)
     } catch (err) {
