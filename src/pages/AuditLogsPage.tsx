@@ -38,7 +38,7 @@ const AuditLogsPage = () => {
     date_from: '',
     date_to: '',
     page: 1,
-    limit: 50,
+    limit: 20,
   })
   const [pagination, setPagination] = useState({ total: 0, pages: 0 })
   const [loading, setLoading] = useState(false)
